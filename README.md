@@ -91,8 +91,8 @@ $$
 教学上的 VWAP 与未来收益可写为：
 
 $$
-\operatorname{VWAP}(W)=\frac{\sum_{k\in W}p_kq_k}{\sum_{k\in W}q_k},\qquad
- y_{i,t}\approx\frac{\operatorname{VWAP}_i((t,t+30\mathrm{min}])}{P_{\mathrm{ref}}(i,t)}-1.
+\mathrm{VWAP}(W)=\frac{\sum_{k\in W}p_kq_k}{\sum_{k\in W}q_k},\qquad
+ y_{i,t}\approx\frac{\mathrm{VWAP}_i((t,t+30\mathrm{min}])}{P_{\mathrm{ref}}(i,t)}-1.
 $$
 
 第二个式子不是官方标签实现。当前参考价格、窗口边界、复权、停牌处理均需确认。赛事全文同时出现“残差收益率”和“未来 30 分钟 VWAP 收益”，标签是否已残差化也是待确认项。不预测隔夜收益。
@@ -117,7 +117,7 @@ $$
 模型产生 $s$，平台在同一时点做去极值、标准化与 BARRA 风格剔除，得到处理后信号 $s^*$。以下式子描述处理顺序，具体算法由平台决定：
 
 $$
-s^*_{i,t}=\operatorname{Neutralize}(\operatorname{Standardize}(\operatorname{Winsorize}(s_{i,t}))).
+s^*_{i,t}=\mathrm{Neutralize}(\mathrm{Standardize}(\mathrm{Winsorize}(s_{i,t}))).
 $$
 
 最终指标依赖 $s^*$、未来标签 $y$，以及平台根据分数生成的组合权重 $w$。
@@ -133,14 +133,14 @@ $$
 ### 3.1 IC 与 IC_IR
 
 $$
-\operatorname{IC}_t=\operatorname{corr}_{i\in S_t}(s^*_{i,t},y_{i,t}),\qquad
-\overline{\operatorname{IC}}=\frac1T\sum_t\operatorname{IC}_t.
+\mathrm{IC}_t=\mathrm{corr}_{i\in S_t}(s^*_{i,t},y_{i,t}),\qquad
+\overline{\mathrm{IC}}=\frac1T\sum_t\mathrm{IC}_t.
 $$
 
 如果采用 RankIC，则分别将信号与收益转换为名次后相关。无并列名次时：
 
 $$
-\operatorname{RankIC}_t=1-\frac{6\sum_i d_i^2}{n(n^2-1)}.
+\mathrm{RankIC}_t=1-\frac{6\sum_i d_i^2}{n(n^2-1)}.
 $$
 
 例如四只股票的模型名次为 `[4,3,2,1]`，收益名次为 `[4,2,1,3]`，名次差平方和为 6，则 RankIC 为 $1-36/60=0.40$。有并列值时应使用平均秩等正确方法，不能直接套无并列公式。
@@ -148,7 +148,7 @@ $$
 未年化的 IC_IR 原理为：
 
 $$
-\operatorname{ICIR}=\frac{\overline{\operatorname{IC}}}{\operatorname{sd}(\operatorname{IC}_1,\ldots,\operatorname{IC}_T)}.
+\mathrm{ICIR}=\frac{\overline{\mathrm{IC}}}{\mathrm{sd}(\mathrm{IC}_1,\ldots,\mathrm{IC}_T)}.
 $$
 
 赛事文本出现 IC 与 RankIC 两种表述；采用哪种相关系数、是否年化、时点加权及零方差处理，以官方模块为准。
@@ -157,7 +157,7 @@ $$
 
 $$
 R_t^{LS}=\sum_i w_{i,t}y_{i,t},\qquad
-\operatorname{Sharpe}\approx\frac{\operatorname{mean}(R_t^{LS}-r_t^f)}{\operatorname{sd}(R_t^{LS}-r_t^f)}\sqrt K.
+\mathrm{Sharpe}\approx\frac{\mathrm{mean}(R_t^{LS}-r_t^f)}{\mathrm{sd}(R_t^{LS}-r_t^f)}\sqrt K.
 $$
 
 高分股票的权重为正，低分股票的权重为负。公式是通用原理：平台的分组、权重、成本、收益口径、无风险收益及年化方式尚需确认，不能用自定义组合声称精确复现公榜。
@@ -167,13 +167,13 @@ $$
 常见换手定义为：
 
 $$
-\operatorname{Turnover}_t\approx\frac12\sum_i|w_{i,t}-w_{i,t-1}|.
+\mathrm{Turnover}_t\approx\frac12\sum_i|w_{i,t}-w_{i,t-1}|.
 $$
 
 对于场景 $c$，可先查看分场景相关性：
 
 $$
-\operatorname{IC}(c)=\operatorname{mean}\{\operatorname{IC}_t:t\in c\}.
+\mathrm{IC}(c)=\mathrm{mean}\{\mathrm{IC}_t:t\in c\}.
 $$
 
 **赛事材料没有给出压力场景稳定性的精确聚合公式。** 分场景 IC、夏普、最弱场景与场景间差异是本地诊断量。场景划分及官方聚合不能自行补成已确认规则。
@@ -183,7 +183,7 @@ $$
 五项原始指标分别转为所有有效提交中的 rank 百分位，每项占 20%：
 
 $$
-\operatorname{Score}=0.2\left[R_{IC}+R_{ICIR}+R_{SR}+R_{Stress}+R_{Turnover}\right].
+\mathrm{Score}=0.2\left[R_{IC}+R_{ICIR}+R_{SR}+R_{Stress}+R_{Turnover}\right].
 $$
 
 其中 $R\in[0,1]$，换手按越低越好排名。五项百分位若为 `[0.80,0.70,0.60,0.50,0.90]`，总分为 0.70。百分位取决于其他有效提交，不能直接由本地训练损失推导。
@@ -210,14 +210,14 @@ flowchart TD
 原始字段按语义分组，每组的参数通过训练学习：
 
 $$
-e_\tau^g=\operatorname{MLP}_g([z_\tau^g;m_\tau^g]),\qquad
+e_\tau^g=\mathrm{MLP}_g([z_\tau^g;m_\tau^g]),\qquad
 h_\tau=W[e_\tau^{price};e_\tau^{volume};e_\tau^{book}]+b.
 $$
 
 把连续 $P$ 条分钟表示编码成一个 patch：
 
 $$
-u_k=\operatorname{PatchEncoder}(h_{kP:(k+1)P},m_{kP:(k+1)P}).
+u_k=\mathrm{PatchEncoder}(h_{kP:(k+1)P},m_{kP:(k+1)P}).
 $$
 
 PatchEncoder 可以是线性投影或小型时间卷积。它从原始序列学习局部组合，不预先计算技术指标。
@@ -252,7 +252,7 @@ PatchEncoder 可以是线性投影或小型时间卷积。它从原始序列学�
 已实现 Huber 与同一时点股票对的排序损失；完整训练循环需在真实数据适配后完成。排序目标为：
 
 $$
-\mathcal L_{rank}=\operatorname{mean}_{(i,j),t}\log\left(1+\exp[-\operatorname{sign}(y_{i,t}-y_{j,t})(s_{i,t}-s_{j,t})]\right).
+\mathcal L_{rank}=\mathrm{mean}_{(i,j),t}\log\left(1+\exp[-\mathrm{sign}(y_{i,t}-y_{j,t})(s_{i,t}-s_{j,t})]\right).
 $$
 
 原型支持的组合损失为：
@@ -268,8 +268,8 @@ $$
 进一步的研究目标可以写成：
 
 $$
-\mathcal L_{proxy}=-\operatorname{mean}_t\rho_t
-+\lambda_v\operatorname{Var}_t(\rho_t)
+\mathcal L_{proxy}=-\mathrm{mean}_t\rho_t
++\lambda_v\mathrm{Var}_t(\rho_t)
 +\lambda_s\mathcal L_{weak}
 +\lambda_c\mathcal L_{turn}.
 $$
