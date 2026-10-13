@@ -9,6 +9,7 @@ from pathlib import Path
 
 import torch
 
+from ._vendor.qlib import COMPONENTS_VERSION
 from .encoders import GroupedNetEncoder, PatchEncoder, UnifiedNetEncoder
 from .data import _validate_mapping
 from .models import AttentionModel, DeepLOBModel, R0Model, R1Model
@@ -16,15 +17,17 @@ from .preprocessing import FrozenPreprocessor
 from .schema import BOOK12_FIELDS, FEATURES, QLIB_COMMIT, SCHEMA_VERSION, ContractError
 
 
-BUNDLE_VERSION = 1
+BUNDLE_VERSION = 3
 MODEL_NAMES = ("R0", "R1", "R1-Book", "Net64", "Net192", "GroupedNet", "Patch1", "Patch5", "DeepLOB")
-MODERN_BUNDLE_VERSION = 2
+MODERN_BUNDLE_VERSION = 4
 MODERN_MODEL_NAMES = ("B-GRU", "B-Transformer", "B-TCN", "B-SelectiveSSM")
 ALL_MODEL_NAMES = MODEL_NAMES + MODERN_MODEL_NAMES
 REQUIRED_CONTRACTS = ("source", "sampling", "universe", "visibility", "label", "training_scope")
 QLIB_LICENSE_DIGEST = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
 EXECUTION_MODULES = ("schema.py", "data.py", "windows.py", "preprocessing.py", "encoders.py", "models.py",
-                     "temporal.py", "backbones.py", "official.py", "output.py", "inference.py")
+                     "temporal.py", "backbones.py", "official.py", "output.py", "inference.py",
+                     "_vendor/__init__.py", "_vendor/qlib/__init__.py", "_vendor/qlib/models.py",
+                     "_vendor/qlib/processors.py", "_vendor/qlib/sampler.py", "_vendor/qlib/utils.py")
 
 
 def create_model(name: str):
@@ -50,7 +53,7 @@ def create_model(name: str):
 
 
 def dependency_versions() -> dict[str, str]:
-    return {name: version(name) for name in ("torch", "pyqlib", "numpy", "pandas", "pyarrow")}
+    return {name: version(name) for name in ("torch", "numpy", "pandas", "pyarrow")}
 
 
 def _digest(path: Path) -> str:
@@ -80,7 +83,7 @@ def _validate_tensor_state(state: dict) -> None:
             raise ContractError(f"BatchNorm 状态必须非负：{name}")
 
 
-def _save_bundle_v1(path, model, preprocessor: FrozenPreprocessor, *, model_name: str,
+def _save_reference_bundle(path, model, preprocessor: FrozenPreprocessor, *, model_name: str,
                 window_length: int, contracts: dict[str, str], seed: int, training_record: dict,
                 instrument_map: dict[int, str]) -> None:
     if type(window_length) is not int or window_length <= 0:
@@ -116,6 +119,7 @@ def _save_bundle_v1(path, model, preprocessor: FrozenPreprocessor, *, model_name
     manifest = {
         "bundle_version": BUNDLE_VERSION, "schema_version": SCHEMA_VERSION,
         "fields": list(FEATURES), "qlib_commit": QLIB_COMMIT,
+        "qlib_components_version": COMPONENTS_VERSION,
         "dependencies": dependency_versions(), "model_name": model_name,
         "window_length": window_length, "contracts": contracts, "seed": seed,
         "training_record": training_record,
@@ -137,10 +141,10 @@ def _save_bundle_v1(path, model, preprocessor: FrozenPreprocessor, *, model_name
     )
 
 
-def _load_bundle_v1(path):
+def _load_reference_bundle(path):
     source = Path(path)
     manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
-    required = {"bundle_version", "schema_version", "fields", "qlib_commit", "dependencies", "model_name",
+    required = {"bundle_version", "schema_version", "fields", "qlib_commit", "qlib_components_version", "dependencies", "model_name",
                 "window_length", "contracts", "seed", "training_record", "instrument_map", "files"}
     if set(manifest) != required:
         raise ContractError("模型包配置字段缺失或未知")
@@ -148,6 +152,8 @@ def _load_bundle_v1(path):
         raise ContractError("模型包或 schema 版本不一致")
     if manifest["fields"] != list(FEATURES) or manifest["qlib_commit"] != QLIB_COMMIT:
         raise ContractError("模型包字段顺序或 Qlib 来源不一致")
+    if type(manifest["qlib_components_version"]) is not int or manifest["qlib_components_version"] != COMPONENTS_VERSION:
+        raise ContractError("模型包内置 Qlib 组件版本不一致")
     if manifest["dependencies"] != dependency_versions():
         raise ContractError("模型包依赖版本与运行环境不一致")
     if type(manifest["window_length"]) is not int or manifest["window_length"] <= 0:
@@ -334,8 +340,9 @@ def _copy_portable_source(stage: Path, manifest: dict) -> list[str]:
             raise ContractError(f"携带复现源码需要可信的 {package} 包")
         target_directory = stage / "source" / package
         target_directory.mkdir(parents=True)
-        for original in sorted(directory.glob("*.py")):
-            relative = f"source/{package}/{original.name}"
+        for original in sorted(directory.rglob("*.py")):
+            relative = f"source/{package}/{original.relative_to(directory).as_posix()}"
+            (stage / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(original, stage / relative)
             files.append(relative)
     qlib_license = Path(__file__).parent / "licenses" / "QLIB-MIT.txt"
@@ -345,6 +352,14 @@ def _copy_portable_source(stage: Path, manifest: dict) -> list[str]:
     (stage / bundled_license).parent.mkdir(parents=True)
     shutil.copyfile(qlib_license, stage / bundled_license)
     files.append(bundled_license)
+    for name in ("LICENSE", "SOURCE.md"):
+        relative = f"source/ptop/_vendor/qlib/{name}"
+        shutil.copyfile(Path(__file__).parent / "_vendor" / "qlib" / name, stage / relative)
+        files.append(relative)
+    embedded_license = "licenses/qlib/LICENSE"
+    (stage / embedded_license).parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(Path(__file__).parent / "_vendor" / "qlib" / "LICENSE", stage / embedded_license)
+    files.append(embedded_license)
     environment = _portable_environment()
     _write_json(stage / "environment.json", environment)
     files.append("environment.json")
@@ -352,9 +367,8 @@ def _copy_portable_source(stage: Path, manifest: dict) -> list[str]:
     if "+cpu" in manifest["dependencies"]["torch"]:
         lines.append("--extra-index-url https://download.pytorch.org/whl/cpu")
     for name, installed in environment["packages"].items():
-        if name not in ("pyqlib", "jinyicapital-e2e"):
+        if name not in ("pyqlib", "jinyicapital-e2e", "ptop"):
             lines.append(f"{name}=={installed}")
-    lines.append(f"pyqlib @ git+https://github.com/microsoft/qlib.git@{QLIB_COMMIT}")
     (stage / "requirements.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     files.append("requirements.txt")
     third_party = package_root.parent / "THIRD_PARTY.md"
@@ -362,9 +376,8 @@ def _copy_portable_source(stage: Path, manifest: dict) -> list[str]:
                   f"# Dependency sources\n\nQlib source: https://github.com/microsoft/qlib/tree/{QLIB_COMMIT}\n")
     provenance += ("\n\n## Bundle dependency licenses\n\n"
                    "The dependency LICENSE/NOTICE files below are copied verbatim from installed distribution metadata. "
-                   f"If Qlib wheel metadata omits its MIT license, the verified repository copy from https://github.com/microsoft/qlib/blob/{QLIB_COMMIT}/LICENSE is used. "
-                   "Qlib is locked to the commit recorded in manifest.json and environment.json. "
-                   "Dependencies remain external installations; source/ contains this repository's ptop and jyc_e2e modules.\n")
+                   f"Embedded Qlib components come from https://github.com/microsoft/qlib/tree/{QLIB_COMMIT} and their MIT license is included at `{embedded_license}`. "
+                   "source/ contains this repository's ptop and jyc_e2e modules, including the embedded components.\n")
     for name in manifest["dependencies"]:
         installed = distribution(name)
         license_count = 0
@@ -383,13 +396,7 @@ def _copy_portable_source(stage: Path, manifest: dict) -> list[str]:
             files.append(relative)
             license_count += 1
             provenance += f"- {name} {manifest['dependencies'][name]}: `{relative}`\n"
-        if license_count == 0 and name == "pyqlib":
-            relative = "licenses/pyqlib/LICENSE"
-            (stage / relative).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(qlib_license, stage / relative)
-            files.append(relative)
-            provenance += f"- pyqlib {manifest['dependencies'][name]}: `{relative}` (verified fixed-commit repository MIT license)\n"
-        elif license_count == 0:
+        if license_count == 0:
             raise ContractError(f"无法定位 {name} 的上游许可文本；请正确安装固定依赖")
     (stage / "THIRD_PARTY.md").write_text(provenance, encoding="utf-8")
     files.append("THIRD_PARTY.md")
@@ -425,7 +432,7 @@ def save_bundle(path, model, preprocessor: FrozenPreprocessor, *, model_name: st
                 model_spec=None, window_length: int, contracts: dict[str, str], seed: int,
                 training_record: dict, instrument_map: dict[int, str], weight_format: str = "json",
                 include_source: bool | None = None) -> None:
-    """保存可审计的推理包。旧调用保持 v1；ModelSpec/torch/source 使用严格 v2。
+    """保存可审计的推理包。固定候选使用 v3；ModelSpec/torch/source 使用严格 v4。
 
     source 只携带可信仓库代码，load_bundle 不执行包内 Python 文件。保存先验证合同，
     在同目录暂存并原子改名；已有路径不能覆盖。
@@ -436,7 +443,7 @@ def save_bundle(path, model, preprocessor: FrozenPreprocessor, *, model_name: st
         raise ContractError("include_source 必须为 bool 或 None")
     if (model_spec is None and model_name in MODEL_NAMES and weight_format == "json"
             and include_source in (None, False)):
-        return _atomic_directory(path, lambda stage: _save_bundle_v1(
+        return _atomic_directory(path, lambda stage: _save_reference_bundle(
             stage, model, preprocessor, model_name=model_name, window_length=window_length,
             contracts=contracts, seed=seed, training_record=training_record, instrument_map=instrument_map))
     from .temporal import ModelSpec
@@ -458,6 +465,7 @@ def save_bundle(path, model, preprocessor: FrozenPreprocessor, *, model_name: st
     manifest = {
         "bundle_version": MODERN_BUNDLE_VERSION, "schema_version": SCHEMA_VERSION,
         "fields": list(FEATURES), "qlib_commit": QLIB_COMMIT, "dependencies": dependency_versions(),
+        "qlib_components_version": COMPONENTS_VERSION,
         "model_name": spec["name"], "model_spec": spec, "window_length": window_length,
         "contracts": contracts, "seed": seed, "training_record": training_record,
         "instrument_map": [[int(key), value] for key, value in sorted(mapping.items())],
@@ -497,14 +505,16 @@ def load_bundle(path):
         # 原格式和严格依赖/合同检查完整保留；创建模板不改变调用方随机状态。
         with torch.random.fork_rng(devices=[]):
             try:
-                return _load_bundle_v1(source)
+                return _load_reference_bundle(source)
             except OSError as error:
                 raise ContractError("模型包文件缺失或无法读取") from error
-    required = {"bundle_version", "schema_version", "fields", "qlib_commit", "dependencies", "model_name",
+    required = {"bundle_version", "schema_version", "fields", "qlib_commit", "qlib_components_version", "dependencies", "model_name",
                 "model_spec", "window_length", "contracts", "seed", "training_record", "instrument_map",
                 "files", "weight_format", "source_files", "execution"}
     if set(manifest) != required or manifest["bundle_version"] != MODERN_BUNDLE_VERSION:
         raise ContractError("模型包配置字段缺失、未知或版本不支持")
+    if type(manifest["qlib_components_version"]) is not int or manifest["qlib_components_version"] != COMPONENTS_VERSION:
+        raise ContractError("模型包内置 Qlib 组件版本不一致")
     if manifest["schema_version"] != SCHEMA_VERSION or manifest["fields"] != list(FEATURES):
         raise ContractError("模型包 schema 或字段顺序不一致")
     if manifest["qlib_commit"] != QLIB_COMMIT or manifest["dependencies"] != dependency_versions():
@@ -531,10 +541,14 @@ def load_bundle(path):
     if (not isinstance(portable_files, list) or any(not isinstance(name, str) for name in portable_files)
             or len(set(portable_files)) != len(portable_files)):
         raise ContractError("模型包携带源码清单无效")
+    embedded_files = {f"source/ptop/{name}" for name in EXECUTION_MODULES if name.startswith("_vendor/")} | {
+        "source/ptop/_vendor/qlib/LICENSE", "source/ptop/_vendor/qlib/SOURCE.md",
+    }
     for name in portable_files:
         parts = Path(name).parts
-        code = (len(parts) == 3 and parts[0] == "source" and parts[1] in ("ptop", "jyc_e2e") and parts[2].endswith(".py")) or name == "source/ptop/licenses/QLIB-MIT.txt"
-        license_file = len(parts) >= 3 and parts[0] == "licenses" and parts[1] in manifest["dependencies"]
+        code = ((len(parts) == 3 and parts[0] == "source" and parts[1] in ("ptop", "jyc_e2e") and parts[2].endswith(".py"))
+                or name == "source/ptop/licenses/QLIB-MIT.txt" or name in embedded_files)
+        license_file = (len(parts) >= 3 and parts[0] == "licenses" and parts[1] in manifest["dependencies"]) or name == "licenses/qlib/LICENSE"
         metadata_file = name in ("requirements.txt", "environment.json", "THIRD_PARTY.md")
         if (name != str(Path(name)) or Path(name).is_absolute() or ".." in parts
                 or not (code or license_file or metadata_file)):

@@ -7,10 +7,8 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
-from qlib.constant import EPS
-from qlib.data.dataset.handler import DataHandlerLP
-from qlib.data.dataset.loader import StaticDataLoader
-from qlib.data.dataset.processor import Fillna, RobustZScoreNorm, ZScoreNorm
+
+from ._vendor.qlib.processors import EPS, Fillna, RobustZScoreNorm, ZScoreNorm
 
 from .schema import FEATURES, PRICE_FIELDS, QLIB_COMMIT, ContractError
 
@@ -51,16 +49,6 @@ def _feature_frame(values: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def _handler(frame: pd.DataFrame, processor) -> DataHandlerLP:
-    return DataHandlerLP(
-        data_loader=StaticDataLoader(frame),
-        infer_processors=[processor, Fillna(fields_group="feature", fill_value=0)],
-        learn_processors=[],
-        shared_processors=[],
-        init_data=False,
-    )
-
-
 class FrozenPreprocessor:
     def __init__(
         self,
@@ -88,8 +76,7 @@ class FrozenPreprocessor:
 
     def _fit_official(self, values: pd.DataFrame):
         processor = self._new_processor()
-        handler = _handler(_feature_frame(values), processor)
-        handler.setup_data(init_type=DataHandlerLP.IT_FIT_IND)
+        processor.fit(_feature_frame(values).sort_index())
         return processor
 
     def fit(
@@ -186,9 +173,9 @@ class FrozenPreprocessor:
         before = self._numeric_fingerprint()
         if self._frozen and before != self._expected_numeric_fingerprint:
             raise ContractError("冻结数值状态被外部修改")
-        handler = _handler(_feature_frame(values), self._processor)
-        handler.setup_data(init_type=DataHandlerLP.IT_LS)
-        transformed = handler.fetch(col_set="feature", data_key=DataHandlerLP.DK_I).reindex(values.index)
+        frame = _feature_frame(values).sort_index()
+        transformed = Fillna(fields_group="feature", fill_value=0)(self._processor(frame))["feature"]
+        transformed = transformed.reindex(values.index)
         raw = transformed.to_numpy()
         if not np.isfinite(raw).all():
             raise ContractError("预处理结果包含非有限 float64 数值")

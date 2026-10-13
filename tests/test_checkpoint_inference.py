@@ -105,7 +105,7 @@ def _random_draws():
 
 
 @pytest.mark.parametrize("name", ["R0", "R1", "R1-Book", "Net64", "Net192", "GroupedNet", "Patch1", "Patch5", "DeepLOB"])
-def test_legacy_bundle_preserves_v1_and_rng(inputs, tmp_path, name):
+def test_reference_bundle_preserves_weights_and_rng(inputs, tmp_path, name):
     _, _, processor, _, _, _, mapping, _ = inputs
     model = create_model(name).eval()
     path = tmp_path / "legacy"
@@ -113,7 +113,7 @@ def test_legacy_bundle_preserves_v1_and_rng(inputs, tmp_path, name):
                 training_record={"scope": "synthetic interface tests"}, instrument_map=mapping)
     rng = torch.random.get_rng_state().clone()
     restored, loaded_processor, manifest = load_bundle(path)
-    assert manifest["bundle_version"] == 1 and "model_spec" not in manifest
+    assert manifest["bundle_version"] == 3 and "model_spec" not in manifest
     assert set(manifest["files"]) == {"model.json", "preprocessor.json"}
     assert loaded_processor.fingerprint == processor.fingerprint
     _assert_nested_equal(model.state_dict(), restored.state_dict())
@@ -129,12 +129,18 @@ def test_modern_bundle_roundtrip_all_families(inputs, tmp_path, name, weight_for
     path = tmp_path / f"{name}-{weight_format}"
     _save_bundle(path, model, processor, mapping, spec, weight_format=weight_format)
     restored, loaded_processor, manifest = load_bundle(path)
-    assert manifest["bundle_version"] == 2 and manifest["model_spec"] == spec.to_dict()
+    assert manifest["bundle_version"] == 4 and manifest["model_spec"] == spec.to_dict()
     assert manifest["weight_format"] == weight_format
     assert "source/ptop/temporal.py" in manifest["source_files"]
     assert "source/jyc_e2e/research_metrics.py" in manifest["source_files"]
     assert "source/jyc_e2e/losses.py" in manifest["source_files"]
-    assert any(name.startswith("licenses/pyqlib/") for name in manifest["source_files"])
+    assert "licenses/qlib/LICENSE" in manifest["source_files"]
+    assert "source/ptop/_vendor/qlib/models.py" in manifest["source_files"]
+    assert "source/ptop/_vendor/qlib/processors.py" in manifest["source_files"]
+    assert "source/ptop/_vendor/qlib/sampler.py" in manifest["source_files"]
+    assert "source/ptop/_vendor/qlib/LICENSE" in manifest["source_files"]
+    assert "pyqlib" not in manifest["dependencies"]
+    assert "pyqlib" not in (path / "requirements.txt").read_text()
     assert (path / "THIRD_PARTY.md").is_file() and (path / "environment.json").is_file()
     assert (path / "requirements.txt").is_file()
     assert loaded_processor.fingerprint == processor.fingerprint
@@ -144,7 +150,7 @@ def test_modern_bundle_roundtrip_all_families(inputs, tmp_path, name, weight_for
     pd.testing.assert_frame_equal(first.records, second.records)
 
 
-@pytest.mark.parametrize("file", ["model.pt", "preprocessor.json", "source/ptop/temporal.py", "requirements.txt", "licenses/pyqlib/LICENSE"])
+@pytest.mark.parametrize("file", ["model.pt", "preprocessor.json", "source/ptop/temporal.py", "requirements.txt", "licenses/qlib/LICENSE", "source/ptop/_vendor/qlib/processors.py"])
 def test_bundle_modified_file_rejected(inputs, tmp_path, file):
     _, _, processor, _, _, _, mapping, _ = inputs
     spec = _spec()
@@ -228,21 +234,22 @@ def test_bundle_and_checkpoint_reject_changed_execution_implementation(inputs, t
         load_inference_checkpoint(checkpoint_path)
 
 
-def test_portable_bundle_uses_fixed_qlib_license_when_wheel_omits_it(inputs, tmp_path, monkeypatch):
+def test_portable_bundle_uses_embedded_qlib_without_distribution_metadata(inputs, tmp_path, monkeypatch):
     import ptop.bundle as bundle_module
 
     original = bundle_module.distribution
 
-    class _NoLicenseMetadata:
-        files = []
+    def installed_distribution(name):
+        assert name != "pyqlib", "内置组件不得读取外部 Qlib 的分发元数据"
+        return original(name)
 
-    monkeypatch.setattr(bundle_module, "distribution", lambda name: _NoLicenseMetadata() if name == "pyqlib" else original(name))
+    monkeypatch.setattr(bundle_module, "distribution", installed_distribution)
     _, _, processor, _, _, _, mapping, _ = inputs
     spec = _spec()
     path = tmp_path / "bundle"
     _save_bundle(path, create_score_model(spec), processor, mapping, spec, weight_format="torch")
-    assert (path / "licenses/pyqlib/LICENSE").read_bytes() == (path / "source/ptop/licenses/QLIB-MIT.txt").read_bytes()
-    assert "fixed-commit repository MIT license" in (path / "THIRD_PARTY.md").read_text()
+    assert (path / "licenses/qlib/LICENSE").read_bytes() == (path / "source/ptop/_vendor/qlib/LICENSE").read_bytes()
+    assert "Embedded Qlib components" in (path / "THIRD_PARTY.md").read_text()
     load_bundle(path)
 
 

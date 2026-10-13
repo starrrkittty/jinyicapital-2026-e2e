@@ -12,7 +12,9 @@
 python -m pip install -r requirements-a.txt
 ```
 
-Qlib 源码安装需要 Git 和 C++ 编译环境；`dai` 使用平台提供的客户端。训练与推理保持依赖版本一致，正式运行时不下载依赖。
+所需 Qlib 组件已包含在 `src/ptop/_vendor/qlib/`，随 `ptop` 自动使用，无需安装 Qlib 或准备 C++ 编译器。`dai` 使用平台提供的客户端。训练与推理保持依赖版本一致，正式运行时不下载依赖。
+
+直接上传源码时保留完整 `src/ptop/` 目录及其中的许可文件，并让 `src/` 位于 Python 导入路径中。内置组件的来源与修改见 [THIRD_PARTY.md](THIRD_PARTY.md)。
 
 ## 调用编码器
 
@@ -53,7 +55,7 @@ N1 只在训练记录上拟合，验证和推理复用冻结状态。按能容�
 
 ## B 的训练与交接
 
-`ptop.training.Trainer` 接收上述 prepared fold，完成联合训练、完整截面验证、早停、最佳/最新 checkpoint、epoch 恢复和模型包导出。`ptop.inference` 提供冻结模型的分批/日期分区推理，保留 sample_id 对齐与逐时点真实覆盖审核。A 的原有 v1 模型包继续兼容，B 的 v2 包保存参数化模型配置、代码、依赖和文件校验和。
+`ptop.training.Trainer` 接收上述 prepared fold，完成联合训练、完整截面验证、早停、最佳/最新 checkpoint、epoch 恢复和模型包导出。`ptop.inference` 提供冻结模型的分批/日期分区推理，保留 sample_id 对齐与逐时点真实覆盖审核。固定候选使用 v3 模型包，参数化配置及源码使用 v4 模型包；它们记录内置组件版本。依赖外部 Qlib 的旧 v1/v2 包不兼容，已有权重须通过新接口重新导出。
 
 ```python
 from ptop.temporal import ModelSpec, create_score_model

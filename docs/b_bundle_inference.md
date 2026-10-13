@@ -22,13 +22,13 @@ loaded_model, loaded_processor, manifest = load_bundle(output_path)
 
 `contracts` 必须恰好包含 `source/sampling/universe/visibility/label/training_scope` 六个非空版本。处理器必须通过 A 的冻结检查；模型类、编码器类、模块配置、字段、输出宽度和每个权重的名称、类型、形状均与配置核对。`window_length` 与 `ModelSpec.lookback` 必须一致。
 
-旧调用仅传 `model_name`，默认保存原 v1 的 `model.json/preprocessor.json/manifest.json`。传 `model_spec`、选择 `weight_format="torch"` 或要求携带源码时，保存 v2；v2 默认包含 `source/ptop/*.py`、`source/jyc_e2e/*.py`、完整安装环境快照 `environment.json`、固定版本 `requirements.txt`、`THIRD_PARTY.md` 及五个核心依赖的上游 LICENSE/NOTICE 文本，可用 `include_source=False` 关闭源码携带。所有模型配置全量保存。旧名称仍表示 A 的固定架构。
+仅传 `model_name` 时，默认保存 v3 的 `model.json/preprocessor.json/manifest.json`。传 `model_spec`、选择 `weight_format="torch"` 或要求携带源码时，保存 v4；v4 默认包含完整 `source/ptop/` Python 源码、`source/jyc_e2e/*.py`、内置 Qlib 组件及许可、完整安装环境快照 `environment.json`、固定版本 `requirements.txt`、`THIRD_PARTY.md` 及四个核心依赖的上游 LICENSE/NOTICE 文本，可用 `include_source=False` 关闭源码携带。所有模型配置全量保存。旧名称仍表示 A 的固定架构。
 
-v2 的 `model.pt` 只含张量状态，加载显式使用 `weights_only=True`；JSON 导出同样支持现代候选。`manifest.files` 的 SHA-256 覆盖权重、处理器、携带源码、环境快照和许可文本。加载严格检查 schema、字段顺序、Qlib 固定提交、依赖版本、合同、文件清单和校验和。缺少权重或不支持的配置直接失败。
+v4 的 `model.pt` 只含张量状态，加载显式使用 `weights_only=True`；JSON 导出同样支持现代候选。`manifest.files` 的 SHA-256 覆盖权重、处理器、携带源码、环境快照和许可文本。加载严格检查 schema、字段顺序、Qlib 固定提交、内置组件版本、依赖版本、合同、文件清单和校验和。缺少权重或不支持的配置直接失败。
 
-执行指纹另绑定 schema、数据、窗口、处理器、编码器、固定模型、现代模型、时序主干、官方输入、输出审核和推理这 11 个模块的实际文件。即使张量形状相同，本地算法源码改变也会拒绝加载；携带的核心源码须与此指纹一致。C 需要原实现时，在新 Python 进程中将可信 bundle 的 `source` 加入模块路径再加载。关闭源码携带仍会验证本地执行指纹。原 A v1 格式继续沿用其已有版本与合同检查。
+执行指纹绑定 schema、数据、窗口、处理器、编码器、固定模型、现代模型、时序主干、官方输入、输出审核、推理及内置 Qlib 组件的实际文件。即使张量形状相同，本地算法源码改变也会拒绝加载；携带的核心源码须与此指纹一致。C 需要原实现时，在新 Python 进程中将可信 bundle 的 `source` 加入模块路径再加载。关闭源码携带仍会验证本地执行指纹。依赖外部 Qlib 的旧 v1/v2 包不兼容，已有权重须用当前模型工厂和冻结处理器重新导出；旧 checkpoint 的环境及执行指纹也会被拒绝。
 
-Qlib 的 wheel 配置可能省略许可文件，因此仓库另携带固定提交的逐字节 MIT 许可副本 `src/ptop/licenses/QLIB-MIT.txt`，打包前核对固定 SHA-256，并在 `THIRD_PARTY.md` 写明公开来源；其余核心依赖使用安装 distribution 中的 LICENSE/NOTICE。
+内置 Qlib 组件的 MIT 许可和来源说明随 `source/ptop/_vendor/qlib/` 提供，模型包另复制许可到 `licenses/qlib/LICENSE`。仓库中的固定提交许可副本 `src/ptop/licenses/QLIB-MIT.txt` 也核对 SHA-256 后随包提供。其余核心依赖使用安装 distribution 中的 LICENSE/NOTICE。
 
 保存先完成合同检查，再在同一父目录暂存、同步文件并改名；已有 bundle 路径不能覆盖。每个训练 epoch 可使用独立目录。加载调用可信的本地模型工厂，不执行包内 Python 源码，也不会拟合处理器或安装依赖。携带源码可供审核和在预先安装依赖的环境复现；部署端自行将可信 `source` 加入 Python 模块路径。训练记录应保存运行命令、配置、数据范围和对应验证证据。
 
@@ -142,7 +142,7 @@ for result in predict_bundle_partitions(
 
 ## 验证范围
 
-`tests/test_checkpoint_inference.py` 使用合成、带空股票与真实缺失分钟的官方形状样本，验证旧 v1 与全部四个 B 模型 JSON/torch 往返、文件修改拒绝、配置与依赖检查、完整模型/optimizer/scheduler/CPU AMP/随机状态恢复、下一次训练更新复现、独立 sampler 状态、微批与重排、掩码/键/时序验证、零分回退覆盖门槛、冻结处理器和分区查询惰性。最终 CUDA 和真实窗口集成证据见 [B 验证记录](b_verification.md)；真正的官方收益标签与 DAI 平台提交仍需由比赛训练及 C 的部署记录提供。
+`tests/test_checkpoint_inference.py` 使用合成、带空股票与真实缺失分钟的官方形状样本，验证固定候选 v3 与全部四个 B 模型 v4 JSON/torch 往返、文件修改拒绝、配置与依赖检查、完整模型/optimizer/scheduler/CPU AMP/随机状态恢复、下一次训练更新复现、独立 sampler 状态、微批与重排、掩码/键/时序验证、零分回退覆盖门槛、冻结处理器和分区查询惰性。历史 CUDA 和真实窗口集成证据见 [B 验证记录](b_verification.md)；真正的官方收益标签与 DAI 平台提交仍需由比赛训练及 C 的部署记录提供。
 
 模型包子分支合入前，2026-10-12 在 Python 3.12、Torch 2.8.0+cpu、NumPy 2.2.6、Pandas 2.2.3、PyArrow 20.0.0 和固定提交的 Qlib 0.9.8 环境，使用两个 CPU 线程运行以下三套测试：**213 passed，4 skipped**（39.56 秒）。跳过的四项是时序模型显式 opt-in 的 CUDA 测试。九个旧模型均验证 v1 精确权重往返；携带源码还在隔离工作目录的新 Python 进程中加载，确认实际导入 `source/ptop` 和 `source/jyc_e2e` 并复现 Transformer 分数。此为子分支阶段记录，最终整套测试为 CPU269/CUDA285 passed。
 
