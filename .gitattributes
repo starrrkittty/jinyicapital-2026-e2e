@@ -1,0 +1,2 @@
+# 固定许可的 SHA-256 依赖原始换行，跨平台检出时保持 LF。
+/src/ptop/licenses/QLIB-MIT.txt text eol=lf

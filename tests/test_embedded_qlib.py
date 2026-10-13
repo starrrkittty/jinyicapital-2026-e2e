@@ -79,7 +79,7 @@ def test_embedded_components_train_save_reload_and_infer(tmp_path, name):
                 contracts={key: "synthetic" for key in REQUIRED_CONTRACTS}, seed=17,
                 training_record={"scope": "synthetic CPU verification"}, instrument_map={1: "SYNTHETIC"})
     restored, recovered, manifest = load_bundle(path)
-    assert manifest["bundle_version"] == 2
+    assert manifest["bundle_version"] == 3
     assert manifest["qlib_components_version"] == COMPONENTS_VERSION
     assert manifest["qlib_commit"] == QLIB_COMMIT
     assert "pyqlib" not in manifest["dependencies"]

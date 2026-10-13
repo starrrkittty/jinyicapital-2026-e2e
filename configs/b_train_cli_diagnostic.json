@@ -1,0 +1,27 @@
+{
+  "model": {"name": "B-GRU", "encoder": "ALSTM", "width": 32, "layers": 2, "pooling": "mean", "lookback": 120, "heads": 4, "head_width": 32},
+  "training": {"epochs": 2, "learning_rate": 0.0003, "patience": 3, "selection_metric": "loss", "mode": "min", "seed": 7, "precision": "fp32", "deterministic": true, "microbatch_size": 4},
+  "fold": {"name": "diagnostic-real-bars", "train_start": "2020-01-02", "validation_start": "2020-01-06", "validation_end": "2020-01-07"},
+  "scope": "diagnostic",
+  "data_factory": "ptop.local_training:diagnostic_training_factory",
+  "data": {
+    "scope": "diagnostic",
+    "data_dir": "/home/data4/hts/jyc2026/e2e_data/cpt_jyc_2026_e2e_bar1m",
+    "cache_dir": "/home/data4/hts/jyc2026/b_runs/shared_raw_cache",
+    "days": ["2020-01-02", "2020-01-03", "2020-01-06"],
+    "instrument_ids": [11, 16, 19, 30],
+    "endpoint_minutes": ["10:00", "11:00", "14:00"],
+    "fit_window_length": 120,
+    "bar_end_is_available": true,
+    "negative_order_policy": "reject",
+    "seed": 7
+  },
+  "contracts": {
+    "source": "local authorized bar1m; diagnostic 20200102/03/06 only",
+    "sampling": "explicit engineering endpoints on observed grid; not official sampling",
+    "universe": "raw instrument IDs 11/16/19/30; no guessed symbol mapping",
+    "visibility": "diagnostic assumption bar end equals available_at; production visibility unverified",
+    "label": "diagnostic-keyed-target.v1",
+    "training_scope": "diagnostic real bars with synthetic targets; engineering evidence only"
+  }
+}

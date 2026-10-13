@@ -27,3 +27,5 @@ dist/
 *.hdf5
 *.npy
 *.npz
+
+.document_env/

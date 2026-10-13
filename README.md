@@ -1,4 +1,6 @@
-# 数据处理与输入编码
+# 数据处理、端到端训练与推理
+
+当前仓库同时包含 `src/ptop/` 的数据、预处理与 encoder 实验模块，以及 `src/jyc_e2e/` 的模型原型。损失设计与训练评估规划见 [第一阶段损失函数接入说明](docs/stage_one_losses.md) 和 [完整训练评估规划](docs/objective_training_plan.md)。
 
 [src/ptop/](src/ptop/) 提供云端 1 分钟数据读取、N1 标准化、当日历史窗口和可训练编码器。默认窗口为 120 分钟，使用 25 个原始字段及观测掩码。
 
@@ -30,7 +32,7 @@ tokens, token_valid = encoder(x, observed, step_valid)
 
 三个输入张量放在同一设备。接入自己的模型时，把编码器注册为 `self.encoder`，让优化器包含它的参数。
 
-需要完整参照模型时，使用 `ptop.bundle.create_model("R1")`；调用参数相同，返回 `[B]` 分数。模型保存与恢复使用 `save_bundle/load_bundle`，仅支持代码中已有的模型配置。当前模型包格式为 v2，与 v1 包不兼容。
+需要 A 的完整参照模型时，使用 `ptop.bundle.create_model("R1")`。B 的 `create_score_model(ModelSpec(...))` 支持 GRU、Transformer、TCN 和选择性状态空间研究模型，以及 A 的九个原有候选；调用参数相同，返回 `[B]` 分数。
 
 ## 准备数据
 
@@ -51,4 +53,29 @@ tokens, token_valid = encoder(x, observed, step_valid)
 
 N1 只在训练记录上拟合，验证和推理复用冻结状态。按能容纳于内存的区间读取数据，各分区共用本折 N1；窗口不跨日，决策时点需包含在分钟网格中。
 
-上述函数已有实现和本地接口测试。完整 epoch 循环、业务模型组装和平台提交入口由调用方组织；真实 DAI/Linux/CUDA 运行尚未验证。依赖来源见 [THIRD_PARTY.md](THIRD_PARTY.md)。
+## B 的训练与交接
+
+`ptop.training.Trainer` 接收上述 prepared fold，完成联合训练、完整截面验证、早停、最佳/最新 checkpoint、epoch 恢复和模型包导出。`ptop.inference` 提供冻结模型的分批/日期分区推理，保留 sample_id 对齐与逐时点真实覆盖审核。固定候选使用 v3 模型包，参数化配置及源码使用 v4 模型包；它们记录内置组件版本。依赖外部 Qlib 的旧 v1/v2 包不兼容，已有权重须通过新接口重新导出。
+
+```python
+from ptop.temporal import ModelSpec, create_score_model
+from ptop.training import Trainer, seed_everything
+from ptop.training_config import TrainingConfig
+
+config = TrainingConfig(seed=7)
+spec = ModelSpec(name="B-GRU", lookback=120)
+seed_everything(config.seed, deterministic=config.deterministic)
+model = create_score_model(spec)
+trainer = Trainer(model, config, output_dir=private_run_dir,
+                  model_spec=spec, contracts=contracts, fold=fold,
+                  instrument_map=instrument_map, device=device)
+result = trainer.fit(prepared)
+```
+
+完整训练脚本入口为 `python -m ptop.train --config /private/run.json --output /private/run --device cpu`。合同、配置结构、恢复及 C 的目标/评价注入见 [B 训练与交接](docs/b_training_handoff.md)；模型论文与适配边界见 [时序研究](docs/b_temporal_research.md)，保存与推理见 [模型包与推理](docs/b_bundle_inference.md)。
+
+本地月度 Feather 用 `ptop.local_training` 按批读取并生成日分区，避免一次加载五年数据。真实行情工程诊断与多模型、多窗口、多 seed 实验入口见 [本地实验](docs/b_local_experiments.md)。诊断目标不是官方收益；正式训练要求真实标签、采样集合、股票代码映射与可见性合同。官方评分、唯一提交 Notebook 和线上实际验证由 C 衔接。依赖来源见 [THIRD_PARTY.md](THIRD_PARTY.md)。
+
+固定依赖下的 CPU/CUDA 测试、真实窗口实验、恢复检查和资源测量见 [B 验证记录](docs/b_verification.md)。混合精度只用于训练，验证和默认推理均使用 FP32；训练环境与 C 的部署环境保持相同 Torch build。
+
+四个下载包的行数、字段单位、实际同时间数据示例及 raw25 顺序见 [真实数据参考](docs/b_data_reference.md)。

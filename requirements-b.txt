@@ -1,0 +1,2 @@
+# 使用共享运行依赖；Qlib 组件随项目源码提供。
+-r requirements-a.txt
