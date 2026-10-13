@@ -15,9 +15,9 @@ scores       -> C：损失、评估、平台推理 -> 实验结论与提交结�
 
 | 队员 | 主责 | 必须交付的工程工作 | 独立研究方向 |
 | --- | --- | --- | --- |
-| A：输入与表示 | 把合法历史数据变成可学习 token | 数据读取、样本窗口、缺失处理、标准化、采样器、可训练 encoder | 数值分组编码、盘口结构编码、分钟与 patch token |
-| B：主干与训练 | 从 token 学到预测分数，完成联合训练 | 主干、预测头、训练循环、设备管理、早停、完整检查点 | GRU、时序卷积、Transformer 及池化方式 |
-| C：目标与评测 | 判断分数是否改善比赛表现，完成平台推理入口 | 损失函数、本地指标、官方评估适配、推理 Notebook、提交清单 | 排序目标、稳定性、换手与收益表现的权衡 |
+| A：输入与表示 | 把合法历史数据变成可学习 token | 数据读取、样本窗口、缺失处理、标准化、采样器、可训练 encoder | 数值分组编码、盘口结构编码、分钟与 [patch](https://arxiv.org/abs/2211.14730)（分段编码）token |
+| B：主干与训练 | 从 token 学到预测分数，完成联合训练 | 主干、预测头、训练循环、设备管理、早停、完整检查点 | [GRU](https://pytorch.org/docs/stable/generated/torch.nn.GRU.html)（门控循环单元）、[时序卷积](https://arxiv.org/abs/1803.01271)、[Transformer](https://arxiv.org/abs/1706.03762) 及[池化](https://pytorch.org/docs/stable/nn.html)方式 |
+| C：目标与评测 | 判断分数是否改善比赛表现，完成平台推理入口 | 损失函数、本地指标、官方评估适配、推理 Notebook、提交清单 | 排序目标、稳定性、[换手](../README.md#33-换手与压力场景)与收益表现的权衡 |
 
 这不是按“模型、杂务、提交”分工。三人分别拥有一个可研究的模块和一组必要工程任务。A 前期工作较多，B 在训练阶段较多，C 在评测和提交阶段较多；按整个项目衡量负担，并每周重新分配超量任务。
 
@@ -44,7 +44,7 @@ scores       -> C：损失、评估、平台推理 -> 实验结论与提交结�
 ### 工程责任
 
 - 将 A 的 encoder 和自己的主干、预测头装进同一个完整模型。
-- 实现优化器、学习率计划、梯度裁剪、设备转移、早停与恢复训练。
+- 实现优化器、[学习率计划](https://pytorch.org/docs/stable/optim.html)（learning rate scheduler）、[梯度裁剪](https://pytorch.org/docs/stable/generated/torch.nn.utils.clip_grad_norm_.html)、设备转移、早停与恢复训练。
 - 调用 C 提供的损失和评估入口，用统一验证结果选择检查点。
 - 保存 encoder、主干、预测头的参数，以及预处理状态、字段顺序、配置、随机种子和数据切分标识。
 - 实现模型加载与批量预测，供 C 的平台 Notebook 调用。
@@ -61,9 +61,9 @@ scores       -> C：损失、评估、平台推理 -> 实验结论与提交结�
 ### 工程责任
 
 - 和 A 核对官方目标的 VWAP 窗口、端点、价格基准及跨午休规则，记录公式与出处。
-- 实现 Huber 基线损失、同一截面排序损失与可配置组合。
-- 实现研究用 IC、IC_IR、多空收益、夏普、压力分组与换手诊断，并记录样本数量及覆盖率。
-- 核对官方去极值、标准化、BARRA 风格剔除与最终评分口径，用官方评估结果校准本地报告。
+- 实现 [Huber](https://pytorch.org/docs/stable/generated/torch.nn.HuberLoss.html) 基线损失、同一截面排序损失与可配置组合。
+- 实现研究用 [IC](../README.md#31-ic-与-ic_ir)、[IC_IR](../README.md#31-ic-与-ic_ir)、多空收益、[夏普](../README.md#32-多空组合夏普)、压力分组与换手诊断，并记录样本数量及覆盖率。
+- 核对官方去极值、标准化、[BARRA](https://www.msci.com/data-and-analytics/factor-investing/equity-factor-models) 风格剔除与最终评分口径，用官方评估结果校准本地报告。
 - 实现唯一的推理 Notebook：通过 `datasources` 读取数据，调用 A 的处理器和 B 的模型加载入口，返回规定格式。
 - 整理离线依赖、文件清单、运行日志与平台报错，组织提交演练。
 
@@ -101,9 +101,9 @@ tokens, token_valid = input_encoder(x, observed)
 # token_valid: bool [B,N], True = 有效 token
 ```
 
-A 负责 token 生成、分组、patch 划分、顺序与语义；B 负责位置编码、时序主干、池化和预测头。不要在两侧重复添加位置编码。分钟 token 的 N=L；patch 方案的 N 由 padding 和 patch 规则确定，规则必须写入配置。
+A 负责 token 生成、分组、patch 划分、顺序与语义；B 负责[位置编码](https://arxiv.org/abs/1706.03762)、时序主干、池化和预测头。不要在两侧重复添加位置编码。分钟 token 的 N=L；patch 方案的 N 由 padding 和 patch 规则确定，规则必须写入配置。
 
-所有外部接口统一 True=有效；调用 PyTorch 的 padding mask 等 API 时，由模块内部转换成其要求的含义。全缺失窗口的处理要明确，避免全掩码注意力出现 NaN。
+所有外部接口统一 True=有效；调用 PyTorch 的 [padding mask](https://pytorch.org/docs/stable/generated/torch.nn.Transformer.html) 等 API 时，由模块内部转换成其要求的含义。全缺失窗口的处理要明确，避免全掩码注意力出现 NaN。
 
 ### 5.3 分数与损失：B 到 C
 
