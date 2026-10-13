@@ -5,6 +5,7 @@ from pathlib import Path
 
 import torch
 
+from ._vendor.qlib import COMPONENTS_VERSION
 from .encoders import GroupedNetEncoder, PatchEncoder, UnifiedNetEncoder
 from .data import _validate_mapping
 from .models import AttentionModel, DeepLOBModel, R0Model, R1Model
@@ -12,7 +13,7 @@ from .preprocessing import FrozenPreprocessor
 from .schema import BOOK12_FIELDS, FEATURES, QLIB_COMMIT, SCHEMA_VERSION, ContractError
 
 
-BUNDLE_VERSION = 1
+BUNDLE_VERSION = 2
 MODEL_NAMES = ("R0", "R1", "R1-Book", "Net64", "Net192", "GroupedNet", "Patch1", "Patch5", "DeepLOB")
 REQUIRED_CONTRACTS = ("source", "sampling", "universe", "visibility", "label", "training_scope")
 
@@ -36,7 +37,7 @@ def create_model(name: str):
 
 
 def dependency_versions() -> dict[str, str]:
-    return {name: version(name) for name in ("torch", "pyqlib", "numpy", "pandas", "pyarrow")}
+    return {name: version(name) for name in ("torch", "numpy", "pandas", "pyarrow")}
 
 
 def _digest(path: Path) -> str:
@@ -91,6 +92,7 @@ def save_bundle(path, model, preprocessor: FrozenPreprocessor, *, model_name: st
     manifest = {
         "bundle_version": BUNDLE_VERSION, "schema_version": SCHEMA_VERSION,
         "fields": list(FEATURES), "qlib_commit": QLIB_COMMIT,
+        "qlib_components_version": COMPONENTS_VERSION,
         "dependencies": dependency_versions(), "model_name": model_name,
         "window_length": window_length, "contracts": contracts, "seed": seed,
         "training_record": training_record,
@@ -115,7 +117,7 @@ def save_bundle(path, model, preprocessor: FrozenPreprocessor, *, model_name: st
 def load_bundle(path):
     source = Path(path)
     manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
-    required = {"bundle_version", "schema_version", "fields", "qlib_commit", "dependencies", "model_name",
+    required = {"bundle_version", "schema_version", "fields", "qlib_commit", "qlib_components_version", "dependencies", "model_name",
                 "window_length", "contracts", "seed", "training_record", "instrument_map", "files"}
     if set(manifest) != required:
         raise ContractError("模型包配置字段缺失或未知")
@@ -123,6 +125,8 @@ def load_bundle(path):
         raise ContractError("模型包或 schema 版本不一致")
     if manifest["fields"] != list(FEATURES) or manifest["qlib_commit"] != QLIB_COMMIT:
         raise ContractError("模型包字段顺序或 Qlib 来源不一致")
+    if manifest["qlib_components_version"] != COMPONENTS_VERSION:
+        raise ContractError("模型包内置 Qlib 组件版本不一致")
     if manifest["dependencies"] != dependency_versions():
         raise ContractError("模型包依赖版本与运行环境不一致")
     if type(manifest["window_length"]) is not int or manifest["window_length"] <= 0:

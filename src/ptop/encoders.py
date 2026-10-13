@@ -1,11 +1,10 @@
 from collections.abc import Sequence
 
 import torch
-from qlib.contrib.model.pytorch_alstm import ALSTMModel
-from qlib.contrib.model.pytorch_nn import Net
 from torch import Tensor, nn
 from torch.nn import functional as F
 
+from ._vendor.qlib.models import ALSTMModel, Net
 from .schema import BOOK12_FIELDS, BOOK_FIELDS, FEATURES, OHLC_FIELDS, TRADE_FIELDS, ContractError
 
 

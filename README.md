@@ -10,7 +10,9 @@
 python -m pip install -r requirements-a.txt
 ```
 
-Qlib 源码安装需要 Git 和 C++ 编译环境；`dai` 使用平台提供的客户端。训练与推理保持依赖版本一致，正式运行时不下载依赖。
+所需 Qlib 组件已包含在 `src/ptop/_vendor/qlib/`，随 `ptop` 自动使用，无需安装 Qlib 或准备 C++ 编译器。`dai` 使用平台提供的客户端。训练与推理保持依赖版本一致，正式运行时不下载依赖。
+
+直接上传源码时保留完整 `src/ptop/` 目录及其中的许可文件，并让 `src/` 位于 Python 导入路径中。内置组件的来源与修改见 [THIRD_PARTY.md](THIRD_PARTY.md)。
 
 ## 调用编码器
 
@@ -28,7 +30,7 @@ tokens, token_valid = encoder(x, observed, step_valid)
 
 三个输入张量放在同一设备。接入自己的模型时，把编码器注册为 `self.encoder`，让优化器包含它的参数。
 
-需要完整参照模型时，使用 `ptop.bundle.create_model("R1")`；调用参数相同，返回 `[B]` 分数。模型保存与恢复使用 `save_bundle/load_bundle`，仅支持代码中已有的模型配置。
+需要完整参照模型时，使用 `ptop.bundle.create_model("R1")`；调用参数相同，返回 `[B]` 分数。模型保存与恢复使用 `save_bundle/load_bundle`，仅支持代码中已有的模型配置。当前模型包格式为 v2，与 v1 包不兼容。
 
 ## 准备数据
 

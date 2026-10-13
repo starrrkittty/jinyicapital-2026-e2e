@@ -1,11 +1,10 @@
 from collections.abc import Sequence
 
 import torch
-from qlib.contrib.model.pytorch_alstm import ALSTMModel
-from qlib.contrib.model.pytorch_gru import GRUModel
 from torch import Tensor, nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
+from ._vendor.qlib.models import ALSTMModel, GRUModel
 from .encoders import ALSTMEncoder, DeepLOBEncoder, InputEncoder, RawEncoder
 from .schema import FEATURES, ContractError
 

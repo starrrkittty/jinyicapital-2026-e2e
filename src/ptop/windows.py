@@ -4,9 +4,9 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 import torch
-from qlib.data.dataset import TSDataSampler
 from torch.utils.data import Sampler
 
+from ._vendor.qlib.sampler import TSDataSampler
 from .data import CanonicalData, _timestamps
 from .schema import FEATURES, ContractError
 

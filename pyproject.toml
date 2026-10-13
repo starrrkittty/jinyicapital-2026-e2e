@@ -7,10 +7,13 @@ name = "jinyicapital-e2e"
 version = "0.1.0"
 description = "Research scaffold for the 2026 Jinyi Capital end-to-end track"
 requires-python = ">=3.10"
-dependencies = ["numpy>=1.26,<3", "torch>=2.2,<3"]
+dependencies = ["numpy==2.2.6", "pandas==2.2.3", "pyarrow==20.0.0", "torch==2.8.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"ptop._vendor.qlib" = ["LICENSE", "SOURCE.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
