@@ -22,6 +22,7 @@ from qlib.data.dataset.processor import ZScoreNorm as OriginalZScore
 from ptop._vendor.qlib.models import ALSTMModel, GRUModel, Net
 from ptop._vendor.qlib.processors import Fillna, RobustZScoreNorm, ZScoreNorm
 from ptop._vendor.qlib.sampler import TSDataSampler
+from ptop.local_training import _ColumnReader, _pinned_pairwise_sum
 from ptop.preprocessing import FrozenPreprocessor
 from ptop.schema import FEATURES, PRICE_FIELDS
 
@@ -111,6 +112,28 @@ def feature_frame(values):
     result = values.copy(deep=True)
     result.columns = pd.MultiIndex.from_product([["feature"], values.columns])
     return result
+
+
+def test_large_constant_missing_reference_matches_actual_pinned_qlib(tmp_path):
+    values = np.full(12345, 9.46)
+    values[np.random.default_rng(7).random(len(values)) < 0.1] = np.nan
+    index = pd.MultiIndex.from_arrays([pd.DatetimeIndex(["2024-01-02 10:00"] * len(values)), np.arange(len(values))],
+                                     names=["datetime", "instrument"])
+    frame = pd.DataFrame({("feature", "constant"): values, ("feature", "other"): np.arange(len(values))}, index=index)
+    reference = OriginalZScore(fit_start_time="2024-01-02", fit_end_time="2024-01-02", fields_group="feature")
+    reference.fit(frame)
+    path = tmp_path / "qlib-reference-column.f64"
+    path.write_bytes(np.nan_to_num(values, nan=0.0).tobytes())
+    reader = _ColumnReader(path, len(values))
+    try:
+        count = int(np.isfinite(values).sum())
+        center = float(_pinned_pairwise_sum(reader, 0, len(values)) / count)
+        scale = float(np.sqrt(_pinned_pairwise_sum(reader, 0, len(values), squared_center=center) / count))
+        assert reference.mean_train[0] == (0.0 if scale == 0 else center)
+        assert reference.std_train[0] == (1.0 if scale == 0 else scale)
+        assert bool(reference.ignore[0]) == (scale == 0)
+    finally:
+        reader.close()
 
 
 def original_fit(values, base, start, end):

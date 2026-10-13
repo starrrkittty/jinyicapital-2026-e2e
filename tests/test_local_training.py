@@ -147,8 +147,8 @@ def test_bounded_constant_missing_reduction_matches_pinned_numpy_bitwise(tmp_pat
         reader.close()
 
 
-def test_large_constant_missing_reference_matches_actual_pinned_qlib(tmp_path):
-    from qlib.data.dataset.processor import ZScoreNorm
+def test_large_constant_missing_reference_matches_embedded_processor(tmp_path):
+    from ptop._vendor.qlib.processors import ZScoreNorm
 
     values = np.full(12345, 9.46)
     values[np.random.default_rng(7).random(len(values)) < 0.1] = np.nan
