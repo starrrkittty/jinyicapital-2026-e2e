@@ -108,11 +108,17 @@ class TransformerBackbone(nn.Module):
         output = self.projection(compact)
         output = self.dropout(output + self.positions(output.shape[1], output).unsqueeze(0))
         output = output.masked_fill(~prefix_valid.unsqueeze(-1), 0)
+        # The explicit boolean ``src_mask`` is the only causal mechanism here.
+        # ``nn.MultiheadAttention(is_causal=True)`` is inert on current PyTorch builds
+        # (verified: identical output to no mask), so passing ``is_causal`` alongside
+        # would only look like a second guard. If a future build honours it, a reader
+        # who deleted the boolean mask as "redundant" would silently get a
+        # bidirectional encoder, i.e. future leakage. Keep one explicit mask, and let
+        # test_fusion assert prefix-invariance so removing it fails loudly.
         causal_mask = (torch.ones((output.shape[1], output.shape[1]), dtype=torch.bool, device=output.device).triu(1)
                        if self.causal else None)
         for layer in self.layers:
-            output = layer(output, src_mask=causal_mask, src_key_padding_mask=~prefix_valid,
-                           is_causal=self.causal)
+            output = layer(output, src_mask=causal_mask, src_key_padding_mask=~prefix_valid)
             output = output.masked_fill(~prefix_valid.unsqueeze(-1), 0)
         return self.norm(output).masked_fill(~prefix_valid.unsqueeze(-1), 0), prefix_valid, lengths
 

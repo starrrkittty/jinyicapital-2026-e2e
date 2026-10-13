@@ -1,0 +1,36 @@
+{
+  "seed": 7,
+  "model": {
+    "name": "B-GRU",
+    "encoder": "ALSTM",
+    "width": 64,
+    "layers": 2,
+    "pooling": "last",
+    "lookback": 8,
+    "heads": 4,
+    "head_width": 32
+  },
+  "model_specs": [
+    {
+      "name": "B-GRU",
+      "encoder": "ALSTM",
+      "width": 64,
+      "layers": 2,
+      "pooling": "last",
+      "lookback": 8,
+      "heads": 4,
+      "head_width": 32
+    }
+  ],
+  "bundle_path": "weights/epoch0007",
+  "table_key": "bar30m",
+  "device": "cpu",
+  "microbatch_size": 256,
+  "history_years": 1,
+  "runtime_budget_seconds": 10800,
+  "notes": [
+    "与 configs/b_official_bar30m.json 一致：30m 单频、lookback=8（照单日约 8-9 槽定的上限，不要再调大）。",
+    "seed 与权重包 manifest.json 的 seed 必须相同，冻结后才允许提交。",
+    "runtime_budget_seconds 为 3 小时；实测时长可用 verify_submission.py --runtime-seconds 复核。"
+  ]
+}

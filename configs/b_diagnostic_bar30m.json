@@ -1,0 +1,65 @@
+{
+  "model": {
+    "name": "B-GRU",
+    "encoder": "Raw",
+    "width": 64,
+    "layers": 2,
+    "pooling": "last",
+    "lookback": 8,
+    "heads": 4,
+    "head_width": 32
+  },
+  "training": {
+    "epochs": 2,
+    "learning_rate": 0.0003,
+    "patience": 3,
+    "selection_metric": "ic_mean",
+    "mode": "max",
+    "seed": 7,
+    "precision": "fp32",
+    "deterministic": true,
+    "microbatch_size": 256
+  },
+  "fold": {
+    "name": "diagnostic-bar30m",
+    "train_start": "2020-01-02",
+    "validation_start": "2020-01-15",
+    "validation_end": "2020-01-24"
+  },
+  "scope": "diagnostic",
+  "data_factory": "ptop.local_training:diagnostic_training_factory",
+  "data": {
+    "scope": "diagnostic",
+    "data_dir": "/home/data4/hts/jyc2026/e2e_data/cpt_jyc_2026_e2e_bar30m",
+    "cache_dir": "/home/data4/hts/jyc2026/b_runs/diagnostic_raw_cache_bar30m",
+    "days": [
+      "2020-01-02", "2020-01-03", "2020-01-06", "2020-01-07",
+      "2020-01-08", "2020-01-09", "2020-01-10", "2020-01-13",
+      "2020-01-14", "2020-01-15", "2020-01-16", "2020-01-17",
+      "2020-01-20", "2020-01-21", "2020-01-22", "2020-01-23"
+    ],
+    "instrument_ids": [11, 16, 19, 30],
+    "endpoint_minutes": ["11:30", "14:00", "15:00"],
+    "fit_window_length": 8,
+    "bar_end_is_available": true,
+    "negative_order_policy": "reject",
+    "seed": 7
+  },
+  "contracts": {
+    "source": "local bar30m monthly feathers (int32 counts on the contest machine)",
+    "sampling": "diagnostic endpoints 11:30 / 14:00 / 15:00; not an official sampling contract",
+    "universe": "raw instrument ids 11/16/19/30; not the official universe",
+    "visibility": "date is the bar end time, so bar_end_is_available=true; windows never cross days",
+    "label": "diagnostic-keyed-target.v1",
+    "training_scope": "engineering smoke test only: synthetic keyed targets, NOT evidence of financial predictability"
+  },
+  "evaluator_factory": "ptop.training:five_metric_factory",
+  "evaluation": {
+    "group_ratio": 0.2,
+    "exposure": 0.5,
+    "tie_policy": "exclude",
+    "periods_per_year": null,
+    "transition_policy": "intraday",
+    "scenarios": null
+  }
+}

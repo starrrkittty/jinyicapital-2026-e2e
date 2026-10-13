@@ -7,11 +7,9 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
-from qlib.constant import EPS
-from qlib.data.dataset.handler import DataHandlerLP
-from qlib.data.dataset.loader import StaticDataLoader
-from qlib.data.dataset.processor import Fillna, RobustZScoreNorm, ZScoreNorm
 
+from .runtime import (qlib_data_handler, qlib_epsilon, qlib_processors,
+                      qlib_static_loader)
 from .schema import FEATURES, PRICE_FIELDS, QLIB_COMMIT, ContractError
 
 
@@ -51,10 +49,10 @@ def _feature_frame(values: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def _handler(frame: pd.DataFrame, processor) -> DataHandlerLP:
-    return DataHandlerLP(
-        data_loader=StaticDataLoader(frame),
-        infer_processors=[processor, Fillna(fields_group="feature", fill_value=0)],
+def _handler(frame: pd.DataFrame, processor):
+    return qlib_data_handler()(
+        data_loader=qlib_static_loader()(frame),
+        infer_processors=[processor, qlib_processors().Fillna(fields_group="feature", fill_value=0)],
         learn_processors=[],
         shared_processors=[],
         init_data=False,
@@ -83,13 +81,13 @@ class FrozenPreprocessor:
             fields_group="feature",
         )
         if self.base == "N0":
-            return RobustZScoreNorm(**kwargs, clip_outlier=False)
-        return ZScoreNorm(**kwargs)
+            return qlib_processors().RobustZScoreNorm(**kwargs, clip_outlier=False)
+        return qlib_processors().ZScoreNorm(**kwargs)
 
     def _fit_official(self, values: pd.DataFrame):
         processor = self._new_processor()
         handler = _handler(_feature_frame(values), processor)
-        handler.setup_data(init_type=DataHandlerLP.IT_FIT_IND)
+        handler.setup_data(init_type=qlib_data_handler().IT_FIT_IND)
         return processor
 
     def fit(
@@ -165,7 +163,7 @@ class FrozenPreprocessor:
         self.fit_rows_fingerprint = hashlib.sha256(pd.util.hash_pandas_object(rows).to_numpy().tobytes()).hexdigest()
         self.valid_counts = counts.astype(int).tolist()
         self.degenerate_fields = (
-            [field for field, scale in zip(FEATURES, processor.std_train) if scale == EPS * 1.4826]
+            [field for field, scale in zip(FEATURES, processor.std_train) if scale == qlib_epsilon() * 1.4826]
             if self.base == "N0"
             else []
         )
@@ -187,8 +185,8 @@ class FrozenPreprocessor:
         if self._frozen and before != self._expected_numeric_fingerprint:
             raise ContractError("冻结数值状态被外部修改")
         handler = _handler(_feature_frame(values), self._processor)
-        handler.setup_data(init_type=DataHandlerLP.IT_LS)
-        transformed = handler.fetch(col_set="feature", data_key=DataHandlerLP.DK_I).reindex(values.index)
+        handler.setup_data(init_type=qlib_data_handler().IT_LS)
+        transformed = handler.fetch(col_set="feature", data_key=qlib_data_handler().DK_I).reindex(values.index)
         raw = transformed.to_numpy()
         if not np.isfinite(raw).all():
             raise ContractError("预处理结果包含非有限 float64 数值")
@@ -371,7 +369,7 @@ class FrozenPreprocessor:
                 raise ContractError("N1 零方差状态不符合官方处理器语义")
         elif statistics["ignore"] is not None:
             raise ContractError("N0 不包含 N1 的 ignore 状态")
-        if result.base == "N0" and (scale == EPS * 1.4826).any():
+        if result.base == "N0" and (scale == qlib_epsilon() * 1.4826).any():
             raise ContractError("N0 退化状态不具备冻结资格")
         if result.mode == "N2":
             positions = [FEATURES.index(field) for field in PRICE_FIELDS]

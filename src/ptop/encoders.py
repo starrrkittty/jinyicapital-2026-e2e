@@ -1,11 +1,10 @@
 from collections.abc import Sequence
 
 import torch
-from qlib.contrib.model.pytorch_alstm import ALSTMModel
-from qlib.contrib.model.pytorch_nn import Net
 from torch import Tensor, nn
 from torch.nn import functional as F
 
+from .runtime import alstm_model_class, net_class
 from .schema import BOOK12_FIELDS, BOOK_FIELDS, FEATURES, OHLC_FIELDS, TRADE_FIELDS, ContractError
 
 
@@ -72,7 +71,7 @@ class ALSTMEncoder(InputEncoder):
     def __init__(self, fields: Sequence[str] = FEATURES, net: nn.Sequential | None = None):
         super().__init__(fields, 64)
         # 从锁定 Qlib 类取得完整投影，保持其层名、激活和初始化。
-        self.net = net if net is not None else ALSTMModel(
+        self.net = net if net is not None else alstm_model_class()(
             d_feat=2 * len(fields), hidden_size=64, num_layers=2, dropout=0.0, rnn_type="GRU"
         ).net
 
@@ -86,7 +85,7 @@ class UnifiedNetEncoder(InputEncoder):
         if output_dim not in (64, 192):
             raise ContractError("统一 Net 的配对输出宽度必须为 64 或 192")
         super().__init__(FEATURES, output_dim)
-        self.net = Net(input_dim=50, output_dim=output_dim, layers=(256,), act="LeakyReLU")
+        self.net = net_class()(input_dim=50, output_dim=output_dim, layers=(256,), act="LeakyReLU")
 
     def forward(self, x: Tensor, observed: Tensor, step_valid: Tensor) -> tuple[Tensor, Tensor]:
         rows = self.prepare(x, observed, step_valid)[step_valid]
@@ -107,7 +106,7 @@ class GroupedNetEncoder(InputEncoder):
         self.groups = (OHLC_FIELDS, TRADE_FIELDS, BOOK_FIELDS)
         self.group_indices = tuple(field_indices(group) for group in self.groups)
         self.nets = nn.ModuleList(
-            Net(input_dim=2 * len(group), output_dim=64, layers=(256,), act="LeakyReLU")
+            net_class()(input_dim=2 * len(group), output_dim=64, layers=(256,), act="LeakyReLU")
             for group in self.groups
         )
 

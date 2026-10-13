@@ -1,12 +1,16 @@
 """Stage-one objectives; model predictions and labels use raw return units."""
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import math
 from typing import Literal
 
 import torch
 from torch import nn
 from torch.nn import functional as F
+
+
+SCORE_UNITS = ("raw return units; the model outputs the label's own scale, "
+               "so inference must not rescale the score")
 
 
 @dataclass(frozen=True)
@@ -111,8 +115,18 @@ class PredictionObjective(nn.Module):
         super().__init__()
         self.config = config if config is not None else PredictionLossConfig()
 
+    def configuration(self) -> dict:
+        """Immutable JSON description required by B's trainer and checkpoint contracts.
+
+        ``score_units`` states that this objective expects the head to emit the label's
+        own scale, unlike ``ptop.objectives.RegressionObjective`` which expects an
+        already-normalised ``y / target_scale``. The two must never be mixed inside one
+        train/inference pair; see docs/stage_one_losses.md.
+        """
+        return {"name": "PredictionObjective", "score_units": SCORE_UNITS, **asdict(self.config)}
+
     def forward(
-        self, scores: torch.Tensor, target: torch.Tensor, times: torch.Tensor, *,
+        self, scores: torch.Tensor, target: torch.Tensor, times: torch.Tensor,
         target_valid: torch.Tensor | None = None,
         generator: torch.Generator | None = None,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor | int]]:

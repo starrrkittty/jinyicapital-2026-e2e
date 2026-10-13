@@ -205,7 +205,7 @@ def test_train_seed_is_epoch_explicit_and_shorter_windows_reuse_same_n1(local_fi
     shorter = prepared.with_window(2, seed=29)
     assert shorter.processor is prepared.processor
     assert shorter.manifest["sampling_keys_fingerprint"] == prepared.manifest["sampling_keys_fingerprint"]
-    assert next(iter(shorter.validation_loader())).x.shape == (3, 2, 25)
+    assert next(iter(shorter.validation_loader())).x.shape == (3, 2, len(FEATURES))
     with pytest.raises(ContractError, match="fit_window_length"):
         prepared.with_window(5)
 
@@ -438,7 +438,7 @@ def test_cli_file_factories_require_official_contracts_and_preserve_explicit_fol
               "instrument_map_path": str(mapping_path), "grid_path": str(grid_path), "label_spec": vars(spec)}
     prepared, returned_mapping = local_training_factory(config=config, model_spec=model_spec, fold=fold)
     assert returned_mapping == mapping and prepared.scope == "official"
-    assert next(iter(prepared.validation_loader())).x.shape == (3, 4, 25)
+    assert next(iter(prepared.validation_loader())).x.shape == (3, 4, len(FEATURES))
     diagnostic_config = {"scope": "diagnostic", "data_dir": str(source), "cache_dir": str(tmp_path / "diagnostic_factory_cache"),
                          "days": ["2024-01-02", "2024-01-03", "2024-01-04"], "instrument_ids": [1, 2],
                          "endpoint_minutes": ["09:32", "09:34"]}

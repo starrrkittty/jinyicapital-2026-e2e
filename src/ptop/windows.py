@@ -4,10 +4,10 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 import torch
-from qlib.data.dataset import TSDataSampler
 from torch.utils.data import Sampler
 
 from .data import CanonicalData, _timestamps
+from .runtime import ts_data_sampler_class
 from .schema import FEATURES, ContractError
 
 
@@ -148,8 +148,8 @@ class _WindowDatasetBase:
             endpoints.names = index.names
             endpoint_filter = pd.Series(index.isin(endpoints), index=index)
             # 固定版本会清空传入 DataFrame 的列；owned 专供此 sampler 使用。
-            sampler = TSDataSampler(owned, start=day_grid[0], end=day_grid[-1], step_len=length,
-                                    fillna_type="none", dtype=np.float64, flt_data=endpoint_filter)
+            sampler = ts_data_sampler_class()(owned, start=day_grid[0], end=day_grid[-1], step_len=length,
+                                              fillna_type="none", dtype=np.float64, flt_data=endpoint_filter)
             indexed = pd.Series(np.arange(len(sampler)), index=sampler.get_index())
             self._samplers[day] = sampler
             self._grids[day] = day_grid
@@ -302,3 +302,20 @@ def fit_row_union(dataset: _WindowDatasetBase, *, fit_start: str | pd.Timestamp,
     index = dataset.data.values.index.take(sorted(references))
     times = index.get_level_values("datetime")
     return index[(times >= start) & (times <= end)]
+
+
+def single_day_slot_budget(grid: pd.DatetimeIndex) -> dict:
+    """How many slots the busiest single trading day contributes to the window axis.
+
+    ``WindowDataset`` builds one sampler per day and never lets a window cross a day, so
+    this is the hard ceiling on how many bars any window can actually hold. A
+    ``window_length`` above it means every window is mostly left padding — a configuration
+    mistake rather than a modelling choice — which is easy to miss because the run still
+    succeeds. The fold manifest records this so the number is visible before training.
+    """
+    axis = _timestamps(grid, "trading_grid")
+    if len(axis) == 0:
+        raise ContractError("trading_grid 为空，无法计算单日槽位预算")
+    counts = pd.Series(np.ones(len(axis)), index=axis).groupby(axis.normalize()).size()
+    return {"days": int(counts.size), "max_slots_per_day": int(counts.max()),
+            "min_slots_per_day": int(counts.min()), "median_slots_per_day": float(counts.median())}

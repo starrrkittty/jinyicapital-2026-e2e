@@ -1,4 +1,4 @@
-"""Atomic, weights-only training checkpoints under A's raw25 and processor contracts."""
+"""Atomic, weights-only training checkpoints under A's raw-field and processor contracts."""
 
 from __future__ import annotations
 

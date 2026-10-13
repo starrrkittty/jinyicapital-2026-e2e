@@ -1,12 +1,13 @@
+from __future__ import annotations
+
 from collections.abc import Sequence
 
 import torch
-from qlib.contrib.model.pytorch_alstm import ALSTMModel
-from qlib.contrib.model.pytorch_gru import GRUModel
 from torch import Tensor, nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 from .encoders import ALSTMEncoder, DeepLOBEncoder, InputEncoder, RawEncoder
+from .runtime import alstm_model_class, gru_model_class
 from .schema import FEATURES, ContractError
 
 
@@ -42,7 +43,7 @@ class R0Model(nn.Module):
     def __init__(self, fields: Sequence[str] = FEATURES):
         super().__init__()
         self.encoder = RawEncoder(fields)
-        source = GRUModel(d_feat=self.encoder.output_dim, hidden_size=64, num_layers=2, dropout=0.0)
+        source = gru_model_class()(d_feat=self.encoder.output_dim, hidden_size=64, num_layers=2, dropout=0.0)
         self.rnn = source.rnn
         self.fc_out = source.fc_out
 
@@ -57,7 +58,7 @@ class AttentionModel(nn.Module):
     def __init__(self, encoder: InputEncoder, source: ALSTMModel | None = None):
         super().__init__()
         self.encoder = encoder
-        source = source if source is not None else ALSTMModel(
+        source = source if source is not None else alstm_model_class()(
             d_feat=2 * len(encoder.fields), hidden_size=64, num_layers=2, dropout=0.0, rnn_type="GRU"
         )
         self.rnn = source.rnn
@@ -90,7 +91,7 @@ class AttentionModel(nn.Module):
 
 class R1Model(AttentionModel):
     def __init__(self, fields: Sequence[str] = FEATURES):
-        source = ALSTMModel(d_feat=2 * len(fields), hidden_size=64, num_layers=2, dropout=0.0, rnn_type="GRU")
+        source = alstm_model_class()(d_feat=2 * len(fields), hidden_size=64, num_layers=2, dropout=0.0, rnn_type="GRU")
         super().__init__(ALSTMEncoder(fields=fields, net=source.net), source=source)
 
 

@@ -17,7 +17,7 @@ from .training_config import TrainingConfig
 
 def run(config: dict, *, output_dir, device="cpu", resume=None, stop_after_epochs=None):
     required = {"model", "training", "fold", "contracts", "scope", "data_factory", "data"}
-    optional = {"objective_factory", "evaluator_factory"}
+    optional = {"objective_factory", "evaluator_factory", "evaluation"}
     if not isinstance(config, dict) or not required.issubset(config) or set(config) - required - optional:
         raise ContractError(f"run configuration needs {sorted(required)}; optional {sorted(optional)}")
     spec = ModelSpec.from_dict(config["model"])

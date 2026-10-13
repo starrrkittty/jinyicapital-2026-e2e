@@ -1,5 +1,7 @@
 # 数据处理、端到端训练与推理
 
+> **找不到代码在哪？先看 [代码地图](docs/code_map.md)** —— 30 秒定位到要改的文件。
+
 当前仓库同时包含 `src/ptop/` 的数据、预处理与 encoder 实验模块，以及 `src/jyc_e2e/` 的模型原型。损失设计与训练评估规划见 [第一阶段损失函数接入说明](docs/stage_one_losses.md) 和 [完整训练评估规划](docs/objective_training_plan.md)。
 
 [src/ptop/](src/ptop/) 提供云端 1 分钟数据读取、N1 标准化、当日历史窗口和可训练编码器。默认窗口为 120 分钟，使用 25 个原始字段及观测掩码。

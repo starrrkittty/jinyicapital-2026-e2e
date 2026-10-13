@@ -19,13 +19,14 @@ import random
 import resource
 import tempfile
 import time
-from typing import Callable
+from typing import Callable, Mapping
 
 import numpy as np
 import pandas as pd
 import torch
 
-from jyc_e2e.research_metrics import ic_summary, rank_ic_by_time
+from jyc_e2e.research_metrics import (five_metric_report, ic_summary, intraday_transitions,
+                                      rank_ic_by_time)
 from .objectives import RegressionObjective
 from .preprocessing import FrozenPreprocessor
 from .schema import FEATURES, ContractError
@@ -106,6 +107,69 @@ def research_evaluator(predictions: pd.DataFrame) -> dict:
                   invalid_times=sum(not math.isfinite(v) for v in ic.values()),
                   research_only=True, official_score=None)
     return result
+
+
+def five_metric_evaluator(predictions: pd.DataFrame, *, config: Mapping | None = None) -> dict:
+    """Full research report over aligned decision cross sections.
+
+    This *is* the evaluation chain inside the training loop: the checkpoint is still
+    selected on ``ic_mean`` from this dictionary, so evaluation is not a second script.
+    ``decision_time`` drives the alignment because ``decision_id`` is only guaranteed to
+    identify a timestamp, not to sort chronologically.
+
+    Turnover counts only legal adjacent rebalances: by default a transition must stay
+    within one trading day (``transition_policy="intraday"``), so a lunch break or an
+    overnight jump is not reported as a trade. Pass ``"all"`` to count every adjacent
+    pair. The report is research-only; the platform's percentile score needs the other
+    submissions and is deliberately not computed here.
+    """
+    options = dict(config or {})
+    policy = options.pop("transition_policy", "intraday")
+    if policy not in ("intraday", "all"):
+        raise ContractError("transition_policy must be intraday or all")
+    selected = predictions.loc[predictions.predictable & predictions.target_valid]
+    if selected.empty:
+        raise ContractError("five-metric report needs at least one predictable supervised sample")
+    times = selected.decision_time.to_numpy()
+    if policy == "intraday":
+        # five_metric_report builds its own sorted unique axis; mask the same axis.
+        options["transition_valid"] = intraday_transitions(np.unique(times))
+    report = five_metric_report(
+        selected.score.to_numpy(), selected.target.to_numpy(), times,
+        selected.instrument_id.to_numpy(), **options,
+    )
+    report["transition_policy"] = policy
+    return report
+
+
+def five_metric_factory(*, config):
+    """``ptop.train`` facing factory: return the evaluator the Trainer expects.
+
+    ``run()`` builds hooks as ``resolve(reference)(config=config)`` and the Trainer wants a
+    ``(predictions) -> dict`` callable, so ``five_metric_evaluator`` itself cannot be named
+    directly as ``evaluator_factory``. This wrapper closes that gap, which is what makes the
+    five-metric report reachable from the CLI at all.
+
+    Options come from the run config's ``evaluation`` object and are forwarded verbatim:
+    ``group_ratio``, ``exposure``, ``tie_policy``, ``scenarios``, ``periods_per_year`` and
+    ``transition_policy``. An absent or empty object keeps every documented default.
+    ``scenarios`` stays empty until the platform publishes its stress definition, so the
+    stress component is simply not reported in the meantime rather than being invented.
+    """
+    if config is not None and not isinstance(config, Mapping):
+        raise ContractError("evaluator_factory 收到非 mapping 的运行配置")
+    options = dict((config or {}).get("evaluation") or {})
+    unknown = set(options) - {"group_ratio", "exposure", "tie_policy", "scenarios",
+                              "periods_per_year", "transition_policy"}
+    if unknown:
+        raise ContractError(f"evaluation 含未知选项 {sorted(unknown)}")
+
+    def evaluate(predictions: pd.DataFrame) -> dict:
+        return five_metric_evaluator(predictions, config=options)
+
+    evaluate.__name__ = "five_metric_evaluator"
+    evaluate.configuration = lambda: {"name": "FiveMetricResearchReport", **options}
+    return evaluate
 
 
 def _target_table(table: pd.DataFrame, phase: str, fold: TimeFold) -> pd.DataFrame:
@@ -549,6 +613,9 @@ class Trainer:
                  "scope": self.scope, "objective": objective_config,
                  "evaluator": _callable_contract(self.evaluator), "target_scale": self.target_scale,
                  "implementation": _implementation_contract(), "inputs": _input_contract(prepared),
+                 # 折的 manifest 只留下哈希，这里把单日槽位预算**原样带出来**，
+                 # 否则 lookback 超过单日槽数（30m 上的常见误配）在产物里看不见。
+                 "window_budget": (prepared.manifest or {}).get("window_budget"),
                  "instrument_map": ([[int(key), value] for key, value in sorted(self.instrument_map.items())]
                                     if self.instrument_map is not None else None)}
         indexed_train, indexed_validation = train.set_index("sample_id", drop=False), validation.set_index("sample_id", drop=False)

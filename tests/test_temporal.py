@@ -93,7 +93,7 @@ def test_serialized_spec_rejects_unknown_fields_and_bad_field_types():
 
 
 @pytest.mark.parametrize("encoder", ("Raw", "ALSTM"))
-def test_custom_fields_preserve_raw25_contract_and_ignore_other_fields(encoder):
+def test_custom_fields_preserve_raw_schema_contract_and_ignore_other_fields(encoder):
     model = create_score_model(modern_spec("B-GRU", encoder=encoder, fields=("close", "volume"))).eval()
     batch = inputs()
     changed = batch[0].clone()

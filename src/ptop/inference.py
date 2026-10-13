@@ -244,11 +244,12 @@ def predict_cloud(query: Callable, datasources: Mapping[str, str], model, proces
                   start_date, end_date, history_start, instrument_map: Mapping[int, str],
                   trading_grid: pd.DatetimeIndex, bar_end_is_available: bool,
                   device: str | torch.device = "cpu", window_length: int = 120,
-                  microbatch_size: int = 256, unpredictable_policy: str = "drop") -> InferenceResult:
+                  microbatch_size: int = 256, unpredictable_policy: str = "drop",
+                  table_key: str = "bar1m") -> InferenceResult:
     """A cloud input query only: no label fetch, dependency install or processor fitting."""
     raw, expected = fetch_inference_inputs(
         query, datasources, start_date=start_date, end_date=end_date, history_start=history_start,
-        instrument_map=instrument_map, bar_end_is_available=bar_end_is_available,
+        instrument_map=instrument_map, bar_end_is_available=bar_end_is_available, table_key=table_key,
     )
     return predict_canonical(model, processor, raw, expected, trading_grid, start_date=start_date,
                              end_date=end_date, window_length=window_length, device=device,
@@ -269,21 +270,21 @@ def predict_bundle(path, query: Callable, datasources: Mapping[str, str], *, sta
                    history_start, trading_grid: pd.DatetimeIndex, bar_end_is_available: bool,
                    device: str | torch.device = "cpu", microbatch_size: int = 256,
                    unpredictable_policy: str = "drop", expected_contracts=None,
-                   instrument_map=None) -> InferenceResult:
+                   instrument_map=None, table_key: str = "bar1m") -> InferenceResult:
     model, processor, manifest, mapping = _load_for_inference(
         path, expected_contracts=expected_contracts, instrument_map=instrument_map)
     return predict_cloud(query, datasources, model, processor, start_date=start_date, end_date=end_date,
                          history_start=history_start, instrument_map=mapping, trading_grid=trading_grid,
                          bar_end_is_available=bar_end_is_available, device=device,
                          window_length=manifest["window_length"], microbatch_size=microbatch_size,
-                         unpredictable_policy=unpredictable_policy)
+                         unpredictable_policy=unpredictable_policy, table_key=table_key)
 
 
 def predict_cloud_partitions(query: Callable, datasources: Mapping[str, str], model, processor: FrozenPreprocessor, *,
                              partitions: Iterable[InferencePartition], instrument_map: Mapping[int, str],
                              bar_end_is_available: bool, device: str | torch.device = "cpu",
                              window_length: int = 120, microbatch_size: int = 256,
-                             unpredictable_policy: str = "drop") -> Iterator[InferenceResult]:
+                             unpredictable_policy: str = "drop", table_key: str = "bar1m") -> Iterator[InferenceResult]:
     """Yield one audited partition at a time; all partitions reuse the same frozen state.
 
     Full-day partitions keep A's no-cross-day history rule explicit. history_start must be
@@ -309,7 +310,7 @@ def predict_cloud_partitions(query: Callable, datasources: Mapping[str, str], mo
                                history_start=history, instrument_map=instrument_map,
                                trading_grid=partition.trading_grid, bar_end_is_available=bar_end_is_available,
                                device=device, window_length=window_length, microbatch_size=microbatch_size,
-                               unpredictable_policy=unpredictable_policy)
+                               unpredictable_policy=unpredictable_policy, table_key=table_key)
         previous_end = end
         count += 1
         yield result
@@ -321,10 +322,11 @@ def predict_bundle_partitions(path, query: Callable, datasources: Mapping[str, s
                               partitions: Iterable[InferencePartition], bar_end_is_available: bool,
                               device: str | torch.device = "cpu", microbatch_size: int = 256,
                               unpredictable_policy: str = "drop", expected_contracts=None,
-                              instrument_map=None) -> Iterator[InferenceResult]:
+                              instrument_map=None, table_key: str = "bar1m") -> Iterator[InferenceResult]:
     model, processor, manifest, mapping = _load_for_inference(
         path, expected_contracts=expected_contracts, instrument_map=instrument_map)
     yield from predict_cloud_partitions(query, datasources, model, processor, partitions=partitions,
                                        instrument_map=mapping, bar_end_is_available=bar_end_is_available,
                                        device=device, window_length=manifest["window_length"],
-                                       microbatch_size=microbatch_size, unpredictable_policy=unpredictable_policy)
+                                       microbatch_size=microbatch_size, unpredictable_policy=unpredictable_policy,
+                                       table_key=table_key)

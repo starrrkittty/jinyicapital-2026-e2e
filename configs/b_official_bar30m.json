@@ -1,0 +1,69 @@
+{
+  "model": {
+    "name": "B-GRU",
+    "encoder": "ALSTM",
+    "width": 64,
+    "layers": 2,
+    "pooling": "last",
+    "lookback": 8,
+    "heads": 4,
+    "head_width": 32
+  },
+  "training": {
+    "epochs": 20,
+    "learning_rate": 0.0003,
+    "patience": 3,
+    "selection_metric": "ic_mean",
+    "mode": "max",
+    "seed": 7,
+    "precision": "fp32",
+    "deterministic": true,
+    "microbatch_size": 256
+  },
+  "fold": {
+    "name": "development-bar30m",
+    "train_start": "2020-01-02",
+    "validation_start": "2023-01-01",
+    "validation_end": "2024-01-01"
+  },
+  "scope": "official",
+  "data_factory": "ptop.local_training:local_training_factory",
+  "data": {
+    "scope": "official",
+    "data_dir": "/home/data4/hts/jyc2026/e2e_data/cpt_jyc_2026_e2e_bar30m",
+    "cache_dir": "/home/data4/hts/jyc2026/b_runs/shared_raw_cache_bar30m",
+    "expected_path": "/home/data4/hts/jyc2026/b_runs/exports/development_bar30m/expected.parquet",
+    "instrument_map_path": "/home/data4/hts/jyc2026/b_runs/exports/development_bar30m/instrument_map.json",
+    "grid_path": "/home/data4/hts/jyc2026/b_runs/exports/development_bar30m/grid.parquet",
+    "labels_path": "/home/data4/hts/jyc2026/b_runs/exports/development_bar30m/labels.parquet",
+    "support_path": "/home/data4/hts/jyc2026/b_runs/exports/development_bar30m/support.parquet",
+    "label_spec": {
+      "version": "official-vwap-30m.v1",
+      "source": "cpt_jyc_2026_vwap 的 vwap_return 列；脚本原样使用官方数值，不重算公式",
+      "target_definition": "未来 30 分钟 VWAP 收益，采样时点由官方 expected 集合给定",
+      "residualization": "原样使用官方口径：标签直接取 cpt_jyc_2026_vwap.vwap_return，本仓库不叠加二次残差化（要求1.rtf 的 IC 即对未来 30 分钟 VWAP 收益排序）",
+      "boundary_policy": "目标区间由显式 support 表给出；跨自然日的窗口标为无效（不预测隔夜收益）"
+    },
+    "fit_window_length": 8,
+    "bar_end_is_available": true,
+    "negative_order_policy": "reject",
+    "seed": 7
+  },
+  "contracts": {
+    "source": "官方 cpt_jyc_2026_e2e_bar30m 月度分片；本地授权下载，不下采样、不重采样",
+    "sampling": "官方 expected 集合给定的 30 分钟采样时点（每交易日约 8 个）；第一版只用单频 30m，不做多频融合",
+    "universe": "完全采用 cpt_jyc_2026_instruments 截面表，不按行情记录删减股票",
+    "visibility": "date 为 Bar 结束时刻，故 bar_end_is_available=true；窗口不跨日，不预测隔夜",
+    "label": "official-vwap-30m.v1",
+    "training_scope": "official contract；lookback=8 是照「窗口不跨日 + 30m 单日约 8-9 个槽」定的上限，不要再调大"
+  },
+  "evaluator_factory": "ptop.training:five_metric_factory",
+  "evaluation": {
+    "group_ratio": 0.2,
+    "exposure": 0.5,
+    "tie_policy": "exclude",
+    "periods_per_year": null,
+    "transition_policy": "intraday",
+    "scenarios": null
+  }
+}

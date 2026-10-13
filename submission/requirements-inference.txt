@@ -1,0 +1,15 @@
+# 推理期依赖声明（评测镜像离线预装）。
+#
+# 评测环境无法访问外部网络：下面的包必须在镜像里预装完毕，`pip install --no-index`
+# 不会（也不能）联网下载。版本必须与权重包 manifest.json 里的 dependencies 完全一致，
+# 否则 load_bundle 会以「模型包依赖版本与运行环境不一致」拒绝加载。
+torch==2.8.0
+numpy>=1.26,<3
+pandas==2.2.3
+pyarrow==20.0.0
+
+# Qlib 锁到固定提交，version 本身不是来源证明。推理期确实需要它：
+#   - FrozenPreprocessor 通过 qlib DataHandlerLP 施加冻结归一化状态；
+#   - B-GRU 使用的 ALSTM 编码器复用 qlib.contrib.model.pytorch_alstm。
+# 因此镜像必须预装按该提交构建的 pyqlib；上游与许可来源见 THIRD_PARTY.md。
+pyqlib @ git+https://github.com/microsoft/qlib.git@54355232463878d2eebb91fe0ee5fa7fa1f5976c

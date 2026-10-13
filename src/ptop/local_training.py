@@ -28,7 +28,7 @@ import pyarrow.ipc as ipc
 
 from .data import CanonicalData, _timestamps, _validate_mapping, normalize_bars, normalize_local_bars
 from .official import official_targets
-from .schema import BOOK_ORDER_FIELDS, FEATURES, QLIB_COMMIT, ContractError
+from .schema import BOOK_ORDER_FIELDS, FEATURES, QLIB_COMMIT, SCHEMA_VERSION, ContractError
 from .targets import LabelSpec, TimeFold, attach_targets
 if TYPE_CHECKING:
     from .preprocessing import FrozenPreprocessor
@@ -179,7 +179,8 @@ class LocalBarStore:
                         required = ("date", "instrument_id") + FEATURES
                         missing = set(required).difference(names)
                         if missing:
-                            raise ContractError(f"{path.name} 缺少 raw25 字段：{sorted(missing)}")
+                            raise ContractError(
+                                f"{path.name} 缺少 schema 字段（当前 profile {SCHEMA_VERSION}）：{sorted(missing)}")
                         wanted = list(required) + [x for x in ("instrument", "adjust_factor", "available_at") if x in names]
                         selected_schema = pa.schema([reader.schema.field(x) for x in wanted])
                         if schema is not None and selected_schema != schema:
@@ -565,7 +566,7 @@ class PreparedLocalFold:
             raise ContractError("比较窗口须为正整数，且不能超过共同 N1 的 fit_window_length")
         selected = self.fields if fields is None else tuple(fields)
         if not selected or len(set(selected)) != len(selected) or not set(selected).issubset(FEATURES):
-            raise ContractError("模型字段必须为 raw25 非空无重复子集")
+            raise ContractError("模型字段必须为固定 schema 的非空、无重复子集")
         selected_seed = self.seed if seed is None else seed
         if type(selected_seed) is not int or not 0 <= selected_seed < 2**32:
             raise ContractError("seed 必须为 [0, 2**32) 范围内整数，与 TrainingConfig 一致")
@@ -601,7 +602,7 @@ def _prepare(store: LocalBarStore, expected: pd.DataFrame, targets: pd.DataFrame
     if not expected.decision_time.isin(trading_grid).all():
         raise ContractError("全部决策端点必须在显式分钟网格内")
     if not fields or len(set(fields)) != len(fields) or not set(fields).issubset(FEATURES):
-        raise ContractError("模型字段必须为 raw25 非空无重复子集")
+        raise ContractError("模型字段必须为固定 schema 的非空、无重复子集")
     if type(seed) is not int or not 0 <= seed < 2**32:
         raise ContractError("seed 必须为 [0, 2**32) 范围内整数，与 TrainingConfig 一致")
     train, validation, audit = split_local_targets(expected, targets, label_spec, fold)
@@ -617,6 +618,11 @@ def _prepare(store: LocalBarStore, expected: pd.DataFrame, targets: pd.DataFrame
         fields=fields, instrument_map=instrument_map, scope=scope, bar_end_is_available=bar_end_is_available,
         scale_review=scale_review)
     keys = {"train": train_expected.sample_id.astype(str).tolist(), "validation": validation_expected.sample_id.astype(str).tolist()}
+    from .windows import single_day_slot_budget
+    # 窗口不跨日，所以单日槽数就是窗口实际能装下的上限；超了整轮都在做左侧填充。
+    budget = single_day_slot_budget(trading_grid)
+    budget.update(window_length=window_length, fit_window_length=fit_length,
+                  full_window_possible=window_length <= budget["max_slots_per_day"])
     manifest = {"scope": scope, "data_scope": "official_explicit_contracts" if scope == "official" else DIAGNOSTIC_DATA_SCOPE,
                 "diagnostic_notice": "Synthetic keyed targets are not official labels or evidence of financial predictability."
                 if scope != "official" else None, "source_cache": store.manifest, "normalization": diagnostics,
@@ -624,6 +630,7 @@ def _prepare(store: LocalBarStore, expected: pd.DataFrame, targets: pd.DataFrame
                 "label_spec": vars(label_spec), "fold": {"name": fold.name, "train_start": fold.train_start.isoformat(),
                 "validation_start": fold.validation_start.isoformat(), "validation_end": fold.validation_end.isoformat()},
                 "window_length": window_length, "fit_window_length": fit_length, "fields": list(fields), "seed": seed,
+                "window_budget": budget,
                 "negative_order_policy": store.policy.negative_order_policy, "bar_end_is_available": bar_end_is_available}
     manifest["negative_order_cells_by_loaded_day"] = {key: dict(value) for key, value in store.anomaly_counts_by_day.items()}
     manifest["availability_origin_by_loaded_day"] = dict(store.availability_origin_by_day)

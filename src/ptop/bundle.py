@@ -24,7 +24,8 @@ ALL_MODEL_NAMES = MODEL_NAMES + MODERN_MODEL_NAMES
 REQUIRED_CONTRACTS = ("source", "sampling", "universe", "visibility", "label", "training_scope")
 QLIB_LICENSE_DIGEST = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
 EXECUTION_MODULES = ("schema.py", "data.py", "windows.py", "preprocessing.py", "encoders.py", "models.py",
-                     "temporal.py", "backbones.py", "official.py", "output.py", "inference.py")
+                     "temporal.py", "backbones.py", "official.py", "output.py", "inference.py",
+                     "runtime.py", "submission.py")
 
 
 def create_model(name: str):
@@ -348,13 +349,11 @@ def _copy_portable_source(stage: Path, manifest: dict) -> list[str]:
     environment = _portable_environment()
     _write_json(stage / "environment.json", environment)
     files.append("environment.json")
-    lines = ["# Frozen environment snapshot. Install dependencies before using the trusted source directory."]
-    if "+cpu" in manifest["dependencies"]["torch"]:
-        lines.append("--extra-index-url https://download.pytorch.org/whl/cpu")
+    lines = ["# Frozen environment snapshot; approved offline wheels only.", "--no-index",
+             f"# pyqlib must be built from commit {QLIB_COMMIT}; version alone is not provenance."]
     for name, installed in environment["packages"].items():
-        if name not in ("pyqlib", "jinyicapital-e2e"):
+        if name != "jinyicapital-e2e":
             lines.append(f"{name}=={installed}")
-    lines.append(f"pyqlib @ git+https://github.com/microsoft/qlib.git@{QLIB_COMMIT}")
     (stage / "requirements.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     files.append("requirements.txt")
     third_party = package_root.parent / "THIRD_PARTY.md"

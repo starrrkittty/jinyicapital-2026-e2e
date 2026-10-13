@@ -131,19 +131,24 @@ def fetch_inference_inputs(
     history_start,
     instrument_map: Mapping[int, str],
     bar_end_is_available: bool = False,
+    table_key: str = "bar1m",
 ) -> tuple[CanonicalData, pd.DataFrame]:
-    """注入 dai.query 读取纯推理输入；调用者显式声明授权历史起点。"""
+    """注入 dai.query 读取纯推理输入；调用者显式声明授权历史起点与频率。
+
+    ``table_key`` 必须与训练时使用的频率一致：窗口长度按**槽数**定义，用错频率会静默改变
+    模型看到的时间跨度。网格与行情都从这个键取，避免两者来自不同频率。
+    """
     if type(bar_end_is_available) is not bool:
         raise ContractError("bar_end_is_available 必须为 bool")
     start, end = _range(start_date, end_date)
     history, _ = _range(history_start, end_date)
     if history > start:
         raise ContractError("history_start 不能晚于预测开始时间")
-    if "bar1m" not in datasources:
-        raise ContractError("datasources 缺少 bar1m")
-    table = datasources["bar1m"]
+    if table_key not in datasources:
+        raise ContractError(f"datasources 缺少 {table_key}（必须与训练频率一致）")
+    table = datasources[table_key]
     if not isinstance(table, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*", table):
-        raise ContractError("bar1m 必须为合法的动态表名")
+        raise ContractError(f"{table_key} 必须为合法的动态表名")
     section_filter = {"date": [start.isoformat(sep=" "), end.isoformat(sep=" ")]}
     sections = _query_frame(query, f"SELECT date, instrument FROM {SECTION_TABLE} ORDER BY date, instrument",
                             section_filter, start=start, end=end)

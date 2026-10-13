@@ -128,14 +128,34 @@ class TemporalScoreModel(nn.Module):
     def extra_repr(self) -> str:
         return f"spec={self.spec!r}"
 
-    def forward(self, x: Tensor, observed: Tensor, step_valid: Tensor) -> Tensor:
-        if x.ndim == 3 and x.shape[1] > self.spec.lookback:
+    def encode(self, x: Tensor, observed: Tensor, step_valid: Tensor) -> tuple[Tensor, Tensor]:
+        """A -> B boundary: raw window in, per-step tokens out.
+
+        This materialises the documented ``tokens[B,N,D] + token_valid[B,N]`` contract
+        as a real function boundary, so A's encoder and B's backbone can be developed,
+        swapped and tested apart. ``token_valid`` is ``step_valid``: a real minute
+        without a quote stays a token, only left structural padding is dropped.
+        """
+        if x.ndim != 3:
+            raise ContractError("x 必须为 [B,L,F] 张量")
+        if x.shape[1] > self.spec.lookback:
             raise ContractError(f"输入窗口长度 {x.shape[1]} 超过 ModelSpec.lookback={self.spec.lookback}")
-        output, valid, lengths = self.backbone(*self.encoder(x, observed, step_valid))
+        return self.encoder(x, observed, step_valid)
+
+    def temporal(self, tokens: Tensor, token_valid: Tensor) -> Tensor:
+        """B -> C boundary: tokens in, one finite score per sample out.
+
+        Reads no raw fields and no labels, so an external encoder that satisfies the
+        token contract can be fused without touching the backbone, pool or head.
+        """
+        output, valid, lengths = self.backbone(tokens, token_valid)
         score = self.head(self.pool(output, valid, lengths)).squeeze(-1)
         if not torch.isfinite(score).all():
             raise ContractError("模型 score 包含非有限数值；请检查输入缩放、参数和训练稳定性")
         return score
+
+    def forward(self, x: Tensor, observed: Tensor, step_valid: Tensor) -> Tensor:
+        return self.temporal(*self.encode(x, observed, step_valid))
 
 
 def create_score_model(spec: ModelSpec | Mapping[str, Any] | str = ModelSpec()) -> nn.Module:

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from pandas.api.types import is_bool_dtype
 
-from .schema import ContractError
+from .schema import ContractError, reject_placeholder
 
 
 @dataclass(frozen=True)
@@ -17,8 +17,7 @@ class LabelSpec:
 
     def __post_init__(self):
         for name, value in vars(self).items():
-            if not isinstance(value, str) or not value.strip():
-                raise ContractError(f"标签合同缺少 {name}")
+            reject_placeholder(f"标签合同 {name}", value)
 
 
 def attach_targets(samples: pd.DataFrame, targets: pd.DataFrame, spec: LabelSpec) -> pd.DataFrame:
