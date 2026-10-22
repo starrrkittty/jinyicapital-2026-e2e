@@ -47,6 +47,29 @@ def ic_summary(ic_by_time: dict[object, float]) -> dict[str, float]:
     return {"ic_mean": mean, "ic_ir": mean / scale if scale > 0 else float("nan")}
 
 
+def pearson_ic_by_time(
+    scores: np.ndarray, target: np.ndarray, times: np.ndarray,
+) -> dict[object, float]:
+    """Raw Pearson IC, without the training loss's stabilizer or rank transform.
+
+    Match RankIC's finite-pair filtering and minimum of three stocks. Constant
+    predictions/labels remain undefined in evaluation, not a fabricated zero.
+    """
+    scores, target, times = map(np.asarray, (scores, target, times))
+    if scores.ndim != 1 or scores.shape != target.shape or scores.shape != times.shape:
+        raise ValueError("scores, target, and times must be equal-length vectors")
+    result = {}
+    for time in np.unique(times):
+        within = (times == time) & np.isfinite(scores) & np.isfinite(target)
+        if within.sum() < 3:
+            result[time] = float("nan")
+            continue
+        x, y = scores[within].astype(np.float64), target[within].astype(np.float64)
+        result[time] = (float(np.corrcoef(x, y)[0, 1])
+                        if x.max() != x.min() and y.max() != y.min() else float("nan"))
+    return result
+
+
 def turnover_from_weights(weights: np.ndarray) -> np.ndarray:
     """Half-L1 changes; columns must identify the same stocks at each time."""
 

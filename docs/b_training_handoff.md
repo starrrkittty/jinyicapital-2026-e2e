@@ -50,7 +50,7 @@ B 检查输入有限、缺失填零、只左 padding、每个实际 bar_time≤d
 
 `TrainingConfig` 统一 AdamW、余弦学习率、早停、梯度裁剪、精度、seed 和 microbatch。默认目标是 Huber：仅从有效训练标签估计正尺度，将 target/scale 与 score 比较；可叠加同一 decision 内的 pairwise 排序。scale 在验证与推理固定。
 
-stock microbatch 控制显存，每个 microbatch 做一次优化更新；开启排序时仅比较当前 chunk 的同时间股票对，是显式近似，不等于整截面排序目标。A 的含 BatchNorm 编码器在训练中也受 chunk 分布影响。评估先合并同时间所有预测，再计算 RankIC，不用 microbatch IC 平均代替完整截面。
+默认 `objective_scope="microbatch"` 每个 stock microbatch 做一次优化更新；开启排序时仅比较当前 chunk 的同时间股票对，是显式近似，不等于整截面排序目标。可选 `objective_scope="decision"` 要求一个 batch 覆盖一个完整的已声明决策截面，在分块 forward 后拼接带计算图的分数，统一求损失并更新一次。非零 `ic_weight` 必须使用此模式；它不限制整截面保留的激活内存。A 的含 BatchNorm 编码器在训练中仍受 chunk 分布影响。评估先合并同时间所有预测，再分别计算 Pearson IC 与 RankIC，旧 `ic_mean`/`ic_ir` 继续表示 RankIC。公式、参数、采样与预算对照见 [目标研究](score_aligned_objectives.md)。
 
 全空输入与无效标签不进训练损失，但留在原始分母和排除统计。验证会给所有输入可预测股票打分，不依标签是否有效过滤推理样本。验证不更新模型权重、标准化、优化器或学习率；学习率仅在完成训练与验证后推进。
 

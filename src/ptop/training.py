@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from jyc_e2e.research_metrics import ic_summary, rank_ic_by_time
+from jyc_e2e.research_metrics import ic_summary, pearson_ic_by_time, rank_ic_by_time
 from .objectives import RegressionObjective
 from .preprocessing import FrozenPreprocessor
 from .schema import FEATURES, ContractError
@@ -94,16 +94,22 @@ def write_json(path: str | Path, value) -> None:
 
 
 def research_evaluator(predictions: pd.DataFrame) -> dict:
-    """Use the existing research RankIC with full decision cross sections."""
+    """Report full-section research IC; legacy ic_* names continue to mean RankIC."""
     selected = predictions.loc[predictions.predictable & predictions.target_valid]
-    ic = {}
+    ic, pearson = {}, {}
     for decision, group in selected.groupby("decision_id", sort=False):
         # Grouping once avoids the old helper's O(number_of_times * number_of_rows) selection.
         values = rank_ic_by_time(group.score.to_numpy(), group.target.to_numpy(), np.zeros(len(group), dtype=int))
         ic[str(decision)] = values.get(0, float("nan"))
+        values = pearson_ic_by_time(group.score.to_numpy(), group.target.to_numpy(), np.zeros(len(group), dtype=int))
+        pearson[str(decision)] = values.get(0, float("nan"))
     result = ic_summary(ic)
+    result.update(rank_ic_mean=result["ic_mean"], rank_ic_ir=result["ic_ir"])
+    result.update({"pearson_" + key: value for key, value in ic_summary(pearson).items()})
     result.update(valid_times=sum(math.isfinite(v) for v in ic.values()),
                   invalid_times=sum(not math.isfinite(v) for v in ic.values()),
+                  pearson_valid_times=sum(math.isfinite(v) for v in pearson.values()),
+                  pearson_invalid_times=sum(not math.isfinite(v) for v in pearson.values()),
                   research_only=True, official_score=None)
     return result
 
@@ -374,11 +380,16 @@ class Trainer:
         return selected, selected_processor
 
     def _phase(self, loader, table: pd.DataFrame, *, training: bool, epoch: int):
+        decision_scope = self.config.objective_scope == "decision"
+        if getattr(self.objective, "requires_full_decision", False) and not decision_scope:
+            raise ContractError("objective requires objective_scope='decision'")
+        expected_decisions = table.groupby("decision_id", sort=False).size().to_dict() if decision_scope else None
         self.model.train(training)
         count = steps = batches = skipped = 0
         amp_skipped = 0
         initial_step = self.global_step
         loss_sum = data_wait = 0.0
+        loss_weight = 0
         frames, skip_counts = [], {}
         seen = set()
         started = time.perf_counter()
@@ -390,10 +401,18 @@ class Trainer:
             data_wait += batch_start - last
             batches += 1
             predictable = validate_batch(batch, tuple(self.model.encoder.fields), length=self.model_spec.lookback, scope=self.scope)
+            if decision_scope:
+                decisions = batch.metadata.decision_id.unique()
+                if len(decisions) != 1:
+                    raise ContractError("decision objective requires one decision per batch")
+                if len(batch.metadata) != expected_decisions.get(decisions[0], 0):
+                    raise ContractError("decision objective requires a complete decision sample set")
             if any(key in seen for key in batch.metadata.sample_id):
                 raise ContractError("a phase repeats sample IDs; one epoch must not silently oversample")
             seen.update(batch.metadata.sample_id)
             aligned = self._align(batch, table)
+            # Unique sample IDs (validate_batch), matching table membership and
+            # decision IDs (_align), plus the expected row count prove coverage.
             selected = predictable & aligned.target_valid.to_numpy(dtype=bool)
             reasons = np.where(~predictable, "no_observation_in_model_fields", aligned.supervision_exclusion.to_numpy())
             skipped += int((~selected).sum())
@@ -408,10 +427,11 @@ class Trainer:
             indices = np.flatnonzero(selected if training else predictable)
             if training and len(indices):
                 indices = indices[torch.randperm(len(indices)).numpy()]
-            for offset in range(0, len(indices), self.config.microbatch_size):
-                chosen = indices[offset:offset + self.config.microbatch_size]
-                inputs = [torch.as_tensor(value[chosen], device=self.device)
-                          for value in (batch.x, batch.observed, batch.step_valid)]
+            # In decision scope, keep all chunk graphs until one joint loss and
+            # update. This bounds forward chunk size, not retained activations.
+            update_size = max(len(indices), 1) if decision_scope else self.config.microbatch_size
+            for offset in range(0, len(indices), update_size):
+                chosen = indices[offset:offset + update_size]
                 flags = torch.as_tensor(aligned.target_valid.to_numpy(dtype=bool)[chosen], device=self.device)
                 targets = aligned.target.to_numpy(dtype=np.float32)[chosen]
                 target = torch.as_tensor(np.where(flags.cpu().numpy(), targets, 0.0), device=self.device)
@@ -422,9 +442,17 @@ class Trainer:
                 # AMP is a training optimization. Select checkpoints with the
                 # same FP32 forward used by the frozen inference entry point.
                 with torch.set_grad_enabled(training), (self._autocast() if training else nullcontext()):
-                    scores = self.model(*inputs)
-                    if scores.shape != target.shape or not torch.isfinite(scores).all():
-                        raise ContractError("model must return finite [B] scores")
+                    chunks = []
+                    for start in range(0, len(chosen), self.config.microbatch_size):
+                        chunk = chosen[start:start + self.config.microbatch_size]
+                        inputs = [torch.as_tensor(value[chunk], device=self.device)
+                                  for value in (batch.x, batch.observed, batch.step_valid)]
+                        chunk_scores = self.model(*inputs)
+                        if chunk_scores.shape != (len(chunk),) or not torch.isfinite(chunk_scores).all():
+                            raise ContractError("model must return finite [B] scores")
+                        chunks.append(chunk_scores)
+                        steps += 1
+                    scores = torch.cat(chunks) if decision_scope else chunks[0]
                     if flags.any():
                         loss, diagnostics = self._loss(scores, target, aligned.decision_id.iloc[chosen].to_numpy(), flags)
                     else:
@@ -459,9 +487,10 @@ class Trainer:
                 numeric_loss = float(loss.detach().float().cpu())
                 frame.loc[chosen, "score"] = scores.detach().float().cpu().numpy()
                 supervised_count = int(flags.sum().item())
-                loss_sum += numeric_loss * supervised_count
+                weight = (1 if supervised_count else 0) if decision_scope else supervised_count
+                loss_sum += numeric_loss * weight
+                loss_weight += weight
                 count += supervised_count
-                steps += 1
                 if training and (not gradients_finite or self.global_step == 1 or self.global_step % self.config.log_every == 0):
                     self._log({"event": "step", "epoch": epoch + 1, "global_step": self.global_step,
                                "loss": numeric_loss, "count": len(chosen), "gradient_norm": gradient_norm,
@@ -481,7 +510,8 @@ class Trainer:
             missing = len(set(table.index) - seen)
             raise ContractError(f"phase loader did not process its complete declared sample set ({missing} missing)")
         seconds = time.perf_counter() - started
-        stats = {"loss": loss_sum / count, "count": count, "skipped": skipped,
+        stats = {"loss": loss_sum / loss_weight, "count": count, "skipped": skipped,
+                 "loss_reduction": "decision" if decision_scope else "sample_weighted_microbatch",
                  "skip_reasons": skip_counts, "batches": batches, "microbatches": steps,
                  "optimizer_steps": self.global_step - initial_step, "amp_skipped_steps": amp_skipped,
                  "seconds": seconds, "data_wait_seconds": data_wait, "samples_per_second": count / seconds,
@@ -536,7 +566,13 @@ class Trainer:
             raise ContractError("training-label scale is zero or nonfinite")
         if self.objective is None:
             self.objective = RegressionObjective(target_scale=self.target_scale, huber_delta=self.config.huber_delta,
-                                                 rank_weight=self.config.rank_weight)
+                                                 rank_weight=self.config.rank_weight,
+                                                 rank_temperature=self.config.rank_temperature,
+                                                 rank_min_target_gap=self.config.rank_min_target_gap,
+                                                 rank_max_pairs_per_time=self.config.rank_max_pairs_per_time,
+                                                 rank_weighting=self.config.rank_weighting,
+                                                 rank_gap_cap=self.config.rank_gap_cap,
+                                                 ic_weight=self.config.ic_weight, ic_epsilon=self.config.ic_epsilon)
         if isinstance(self.objective, torch.nn.Module):
             if any(parameter.requires_grad for parameter in self.objective.parameters()):
                 raise ContractError("trainable C loss modules must be registered inside the complete model")

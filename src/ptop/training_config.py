@@ -21,25 +21,42 @@ class TrainingConfig:
     precision: str = "fp32"
     deterministic: bool = True
     microbatch_size: int = 256
+    objective_scope: str = "microbatch"
     target_scale: float | None = None
     rank_weight: float = 0.0
+    rank_temperature: float = 1.0
+    rank_min_target_gap: float = 0.0
+    rank_max_pairs_per_time: int = 8192
+    rank_weighting: str = "uniform"
+    rank_gap_cap: float = 1.0
+    ic_weight: float = 0.0
+    ic_epsilon: float = 1e-4
     huber_delta: float = 1.0
     log_every: int = 10
     amp_initial_scale: float = 1024.0
 
     def __post_init__(self):
-        for name in ("epochs", "patience", "microbatch_size", "log_every"):
+        for name in ("epochs", "patience", "microbatch_size", "log_every", "rank_max_pairs_per_time"):
             value = getattr(self, name)
             if type(value) is not int or value < 1:
                 raise ContractError(f"{name} must be a positive integer")
         if type(self.seed) is not int or not 0 <= self.seed < 2**32:
             raise ContractError("seed must be an integer in [0, 2**32)")
-        for name in ("learning_rate", "min_learning_rate", "weight_decay", "clip_norm", "min_delta", "rank_weight", "huber_delta", "amp_initial_scale"):
+        for name in ("learning_rate", "min_learning_rate", "weight_decay", "clip_norm", "min_delta", "rank_weight", "huber_delta", "amp_initial_scale",
+                     "rank_temperature", "rank_min_target_gap", "rank_gap_cap", "ic_weight", "ic_epsilon"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
                 raise ContractError(f"{name} must be finite and nonnegative")
         if self.learning_rate <= 0 or self.clip_norm <= 0 or self.huber_delta <= 0 or self.amp_initial_scale <= 0:
             raise ContractError("learning_rate, clip_norm, huber_delta and AMP initial scale must be positive")
+        if self.rank_temperature <= 0 or self.rank_gap_cap <= 0 or self.ic_epsilon <= 0:
+            raise ContractError("rank_temperature, rank_gap_cap and ic_epsilon must be positive")
+        if self.rank_weighting not in {"uniform", "target_gap"}:
+            raise ContractError("rank_weighting must be uniform or target_gap")
+        if self.objective_scope not in {"microbatch", "decision"}:
+            raise ContractError("objective_scope must be microbatch or decision")
+        if self.ic_weight and self.objective_scope != "decision":
+            raise ContractError("IC loss requires objective_scope='decision' for full cross sections")
         if self.min_learning_rate > self.learning_rate:
             raise ContractError("min_learning_rate exceeds learning_rate")
         if self.target_scale is not None and (

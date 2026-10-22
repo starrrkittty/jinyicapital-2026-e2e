@@ -72,6 +72,8 @@ result = trainer.fit(prepared)
 
 完整训练脚本入口为 `python -m ptop.train --config /private/run.json --output /private/run --device cpu`。合同、配置结构、恢复及 C 的目标/评价注入见 [B 训练与交接](docs/b_training_handoff.md)；模型论文与适配边界见 [时序研究](docs/b_temporal_research.md)，保存与推理见 [模型包与推理](docs/b_bundle_inference.md)。
 
+损失优化与对照配置见 [面向榜单的目标研究](docs/score_aligned_objectives.md)：默认保留 Huber，可选收益差加权排序及完整决策截面 Pearson IC。`objective_scope="decision"` 在分块前向后统一求损失并更新一次，仍需保留完整截面的计算图；研究验证同时报告 Pearson IC 与 RankIC，不代表官方总分或已验证提分。
+
 本地月度 Feather 用 `ptop.local_training` 按批读取并生成日分区，避免一次加载五年数据。真实行情工程诊断与多模型、多窗口、多 seed 实验入口见 [本地实验](docs/b_local_experiments.md)。诊断目标不是官方收益；正式训练要求真实标签、采样集合、股票代码映射与可见性合同。官方评分、唯一提交 Notebook 和线上实际验证由 C 衔接。依赖来源见 [THIRD_PARTY.md](THIRD_PARTY.md)。
 
 固定依赖下的 CPU/CUDA 测试、真实窗口实验、恢复检查和资源测量见 [B 验证记录](docs/b_verification.md)。混合精度只用于训练，验证和默认推理均使用 FP32；训练环境与 C 的部署环境保持相同 Torch build。

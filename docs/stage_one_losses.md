@@ -2,6 +2,8 @@
 
 `src/jyc_e2e/losses.py` 中的 `PredictionLossConfig` 和 `PredictionObjective` 实现收益回归与同截面排序。当前不包含换手、夏普和压力损失。
 
+主训练器使用归一化分数接口 `ptop.RegressionObjective`，与本文的原始收益接口不同。新增收益差加权排序、完整截面 Pearson IC 的训练接入与对照配置见 [面向榜单的目标研究](score_aligned_objectives.md)；本文保留通用原始收益组件的接口说明。
+
 ## 输入与输出合同
 
 - `scores`、`target`：浮点 `[M]`，均为原始收益单位。真实标签单位由 A 核实；模型最后一层不加 sigmoid。

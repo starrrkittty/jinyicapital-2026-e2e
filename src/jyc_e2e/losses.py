@@ -19,12 +19,19 @@ class PredictionLossConfig:
     rank_temperature: float = 1.0
     min_target_gap: float = 0.0
     max_pairs_per_time: int = 8192
+    rank_weighting: Literal["uniform", "target_gap"] = "uniform"
+    rank_gap_cap: float = 1.0
 
     def __post_init__(self) -> None:
         if self.regression not in {"mse", "huber"}:
             raise ValueError("regression must be mse or huber")
         if self.reduction not in {"time", "sample"}:
             raise ValueError("reduction must be time or sample")
+        if self.rank_weighting not in {"uniform", "target_gap"}:
+            raise ValueError("rank_weighting must be uniform or target_gap")
+        if (isinstance(self.rank_gap_cap, bool) or not math.isfinite(self.rank_gap_cap)
+                or self.rank_gap_cap <= 0):
+            raise ValueError("rank_gap_cap must be finite and positive")
         for name in ("target_scale", "huber_delta", "rank_temperature"):
             value = getattr(self, name)
             if not math.isfinite(value) or value <= 0:
@@ -94,7 +101,16 @@ def _rank_terms(scores, target, times, config, generator):
             counts["no_pair_times"] += 1
             continue
         difference = (scores[indices[left]] - scores[indices[right]]) / config.target_scale
-        losses.append(F.softplus(-gap.sign() * difference / config.rank_temperature).mean())
+        terms = F.softplus(-gap.sign() * difference / config.rank_temperature)
+        if config.rank_weighting == "uniform":
+            losses.append(terms.mean())
+        else:
+            # Normalize weights before exponentiation so tiny scaled gaps cannot
+            # underflow every weight to zero. Labels never receive gradients.
+            log_weights = (gap.detach().abs().double().log()
+                           - math.log(config.target_scale)).clamp_max(math.log(config.rank_gap_cap))
+            weights = (log_weights - log_weights.max()).exp().to(terms.dtype)
+            losses.append((weights * terms).sum() / weights.sum())
     counts["rank_times"] = len(losses)
     loss = torch.stack(losses).mean() if losses else scores[:0].sum()
     return loss, counts
@@ -155,14 +171,73 @@ def pairwise_rank_loss(
     target_scale: float = 1.0, temperature: float = 1.0,
     target_valid: torch.Tensor | None = None,
     generator: torch.Generator | None = None,
+    rank_weighting: Literal["uniform", "target_gap"] = "uniform",
+    rank_gap_cap: float = 1.0,
 ) -> torch.Tensor:
-    """Equal-time rank loss; large groups use bounded sampling with replacement."""
+    """Equal-time ranking with bounded uniform sampling with replacement.
+
+    target_gap weights are min(abs(label difference) / target_scale,
+    rank_gap_cap), normalized within each time. Sampled weighted ratios are
+    self-normalized estimates, not strictly unbiased full-pair objectives.
+    min_target_gap retains raw label units; rank_gap_cap uses scaled units.
+    """
     cfg = PredictionLossConfig(min_target_gap=min_target_gap,
                                max_pairs_per_time=max_pairs_per_time,
-                               target_scale=target_scale, rank_temperature=temperature)
+                               target_scale=target_scale, rank_temperature=temperature,
+                               rank_weighting=rank_weighting, rank_gap_cap=rank_gap_cap)
     scores, target, times = _valid_inputs(scores, target, times, target_valid)
     loss, _ = _rank_terms(scores, target, times, cfg, generator)
     return loss
+
+
+def pearson_ic_loss(
+    scores: torch.Tensor, target: torch.Tensor, times: torch.Tensor, *,
+    target_valid: torch.Tensor | None = None, epsilon: float = 1e-4,
+) -> tuple[torch.Tensor, dict[str, int]]:
+    """Equal-time stabilized Pearson loss on already normalized inputs.
+
+    For centered x and y, correlation is mean(x*y) divided by
+    sqrt(mean(x*x)+epsilon**2) and sqrt(mean(y*y)+epsilon**2).
+    Times with fewer than three valid labels or constant labels are skipped.
+    Constant predictions remain supervised with finite recovery gradients.
+    Callers must assemble full decision sections for a full-section objective;
+    averaging losses over stock microbatches is a different objective.
+    """
+    if isinstance(epsilon, bool) or not math.isfinite(epsilon) or epsilon <= 0:
+        raise ValueError("epsilon must be finite and positive")
+    scores, target, times = _valid_inputs(scores, target, times, target_valid)
+    epsilon_squared = torch.as_tensor(epsilon, dtype=scores.dtype, device=scores.device).square()
+    if not torch.isfinite(epsilon_squared) or epsilon_squared <= 0:
+        raise ValueError("epsilon squared must be finite and positive in the working dtype")
+    losses = []
+    skipped = 0
+    for time in torch.unique(times):
+        selected = times == time
+        if selected.sum() < 3:
+            skipped += 1
+            continue
+        x, y = scores[selected], target[selected]
+        if y.max() == y.min():
+            skipped += 1
+            continue
+        x, y = x - x.mean(), y - y.mean()
+        score_variance = x.square().mean()
+        target_variance = y.square().mean()
+        covariance = (x * y).mean()
+        if not torch.isfinite(torch.stack((score_variance, target_variance, covariance))).all():
+            raise ValueError("nonfinite centered moments in IC loss; check normalized inputs")
+        if target_variance == 0:
+            skipped += 1
+            continue
+        stabilized = torch.stack((score_variance, target_variance)) + epsilon_squared
+        if not torch.isfinite(stabilized).all():
+            raise ValueError("nonfinite stabilized variance in IC loss; check normalized inputs and epsilon")
+        correlation = covariance / stabilized[0].sqrt() / stabilized[1].sqrt()
+        losses.append(1 - correlation)
+    loss = torch.stack(losses).mean() if losses else scores[:0].sum()
+    if not torch.isfinite(loss):
+        raise ValueError("nonfinite IC loss; check normalized inputs and epsilon")
+    return loss, {"ic_times": len(losses), "ic_skipped_times": skipped}
 
 
 def score_loss(
